@@ -1,0 +1,189 @@
+body
+{
+	color:#8c8c8c
+	}
+#loader,.wait:before,.wait:after
+{
+	background:#f3b800
+	}
+
+.wait
+{
+	background:#fff
+	}
+	
+.wait i
+{
+	border-color:#d5472f;
+	background:#288df0
+	}
+
+.wait i:after
+{
+	background:#fff
+	}
+
+.wait i:before
+{
+	border-color:#fff;
+	background:#519c23
+	}
+
+.level
+{
+	padding-top:0;
+	padding-bottom:0
+	}
+
+.navbar
+{
+	background:#5fb7ae
+	}
+
+.navbar .navbar-toggle
+{
+	color:#5fb7ae
+	}
+
+.hero
+{
+	background:#eff2f5 url("../img/googledrive/hero.png") 50% 50px no-repeat;
+	position:relative;
+	background:#eff2f5;
+	padding:101px 0 60px;
+	min-height:800px
+	}
+
+.hero h1,.hero h2,.hero .upperquad,.hero img
+{
+	position:relative;
+	z-index:1
+	}
+
+.hero h1
+{
+	background:0;
+	font-size:46px;
+	line-height:46px;
+	font:400 46px/46px "Open Sans","Helvetica Neue",sans-serif;
+	text-transform:none
+	}
+	
+.hero h1+h2
+{
+	font-size:31px;
+	line-height:31px;
+	font-weight:300;
+	color:#a6a6a6
+	}
+	
+.upperquad
+{
+	background-position:50% -300px
+	}
+
+.upperquad a
+{
+	color:#8c8c8c
+	}
+
+h1
+{
+	color:#383838;
+	background:url("../img/eee.gif") 0 50% repeat-x
+	}
+	
+h1 span
+{
+	padding:0 20px
+	}
+	
+h1
+{
+	font:700 30px/30px "Helvetica Neue",Helvetica,Arial,sans-serif;
+	color:#383838;
+	text-transform:uppercase
+	}
+
+.detail
+{
+	border-top:1px solid #d8dcdf;
+	color:#a1a2a3
+	}
+
+.detail .box:first-child
+{
+	width:64.05484818805093%
+	}
+	
+.detail .box:first-child+.box
+{
+	width:35.94515181194907%
+	}
+
+.box.role h2
+{
+	color:#777
+	}
+
+.box.role p{color:#848484}
+
+.clouds i{display:block;position:absolute;z-index:0;background:url("../img/googledrive/clouds.gif");width:46px;height:33px}
+
+.clouds .c1{top:6.5%;left:-28%}
+
+.loaded .c1{-webkit-animation:float 280s linear -55.5s infinite;-moz-animation:float 280s linear -55.5s infinite;-o-animation:float 280s linear -55.5s infinite;animation:float 280s linear -55.5s infinite}
+
+.clouds .c2{top:14.5%;left:-14.5%;width:84px;height:59px;background-position:0 -33px}
+
+.loaded .c2{-webkit-animation:float 70s linear -19s infinite;-moz-animation:float 70s linear -19s infinite;-o-animation:float 70s linear -19s infinite;animation:float 70s linear -19s infinite}
+
+.clouds .c3{top:32.3%;left:16%;width:34px;height:24px;background-position:0 -92px}
+
+.loaded .c3{-webkit-animation:float 200s linear -87s infinite;-moz-animation:float 200s linear -87s infinite;-o-animation:float 200s linear -87s infinite;animation:float 200s linear -87s infinite}
+
+.clouds .c4{top:23.3%;left:31%;width:44px;height:31px;background-position:0 -116px}
+
+.loaded .c4{-webkit-animation:float 120s linear -61s infinite;-moz-animation:float 120s linear -61s infinite;-o-animation:float 120s linear -61s infinite;animation:float 120s linear -61s infinite}
+
+.clouds .c5{top:34.8%;left:73%;background-position:0 -147px;width:65px;height:46px}
+
+.loaded .c5{-webkit-animation:float 90s linear -65s infinite;-moz-animation:float 90s linear -65s infinite;-o-animation:float 90s linear -65s infinite;animation:float 90s linear -65s infinite}
+
+.clouds .c6{top:5.9%;left:113.4%;width:34px;height:24px;background-position:0 100%}
+
+.loaded .c6{-webkit-animation:float 240s linear -222s infinite;-moz-animation:float 240s linear -222s infinite;-o-animation:float 240s linear -222s infinite;animation:float 240s linear -222s infinite}
+
+@-webkit-keyframes float
+{0%{left:-700px}100%{left:1300px}}
+
+@-moz-keyframes float
+{0%{left:-700px}100%{left:1300px}}@-o-keyframes float{0%{left:-700px}100%{left:1300px}}
+
+@keyframes float
+{0%{left:-700px}100%{left:1300px}}
+
+.flash{overflow:hidden;max-height:853px}
+
+.flash img{display:none}
+
+.flash object{width:1021px;max-width:100%;height:1344px;margin-top:-492px;background:transparent;z-index:0}
+
+.blackout{color:#eee;padding-top:60px}
+
+.blackout h1{background:0;color:#fff;font-size:26px;line-height:26px}@media(min-width:1021px){}
+
+@media(max-width:1020px){.has-flash{display:none}
+.detail .box:first-child+.box .inner
+{padding-right:20px}}
+
+@media(max-width:768px)
+{.blackout p,.blackout h1{padding:0 10px}}
+
+@media(max-width:568px)
+{h1{font-size:20px;line-height:20px;background:0}
+
+.upperquad{background-position:50% -214px}
+.hero{padding:30px 0}
+.hero h1{font-size:32px;line-height:36px}
+.hero h1+h2{font-size:26px}}
