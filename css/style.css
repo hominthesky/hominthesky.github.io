@@ -10,7 +10,7 @@ body
 	
 .wait
 {
-	background:#00aeef
+	background:#5fb7ae
 	}
 .wait i
 {
@@ -20,12 +20,12 @@ body
 	
 .wait i:after
 {
-	background:#00aeef
+	background:#5fb7ae
 	}
 	
 .wait i:before
 {
-	border-color:#00aeef;
+	border-color:#5fb7ae;
 	background:#b3c4d4
 	}
 .navbar

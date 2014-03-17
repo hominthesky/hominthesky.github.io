@@ -4,7 +4,7 @@ body
 	}
 #loader,.wait:before,.wait:after
 {
-	background:#f3b800
+	background:#ff4949
 	}
 
 .wait
@@ -14,8 +14,8 @@ body
 	
 .wait i
 {
-	border-color:#d5472f;
-	background:#288df0
+	border-color:#fbfb4b;
+	background:#92c2f3;
 	}
 
 .wait i:after
@@ -26,7 +26,7 @@ body
 .wait i:before
 {
 	border-color:#fff;
-	background:#519c23
+	background:#f7b16c;
 	}
 
 .level
@@ -37,17 +37,17 @@ body
 
 .navbar
 {
-	background:#5fb7ae
+	background:#ff4949
 	}
 
 .navbar .navbar-toggle
 {
-	color:#5fb7ae
+	color:#ff4949
 	}
 
 .hero
 {
-	background:#eff2f5 url("../img/googledrive/hero.png") 50% 50px no-repeat;
+	background:#eff2f5 url("../img/clearcity/hero.png") 50% 50px no-repeat;
 	position:relative;
 	background:#eff2f5;
 	padding:101px 0 60px;
@@ -128,7 +128,7 @@ h1
 
 .box.role p{color:#848484}
 
-.clouds i{display:block;position:absolute;z-index:0;background:url("../img/googledrive/clouds.gif");width:46px;height:33px}
+.clouds i{display:block;position:absolute;z-index:0;background:url("../img/clearcity/clouds.gif");width:46px;height:33px}
 
 .clouds .c1{top:6.5%;left:-28%}
 
