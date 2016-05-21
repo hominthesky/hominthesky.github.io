@@ -333,6 +333,7 @@ div.footer{
   font-family: "Lato" sans-serif;
   font-weight: 300;
   line-height: 1.5em;
+  padding: 10px;
   cursor: default;
 
 }
