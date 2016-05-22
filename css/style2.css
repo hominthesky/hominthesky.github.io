@@ -5,6 +5,9 @@
   height: 120px;
 
 }
+.work-img-caption h1{
+  line-height: 1.3em;
+}
 
 .work-navbar-container{
   height: 100%;
@@ -221,14 +224,14 @@ display: block;
 padding-top: 60px;
 font-size: 1.2em;
 margin: 20px auto 40px auto;
-line-height: 1.7em;
-text-align: center !important;
+text-align: center!important;
 color: #ccc;
 
 }
 
 .goodbye h1{
   font-size: 2em;
+  line-height: 1.3em!important;
   text-align: center!important;
 }
 
@@ -281,4 +284,12 @@ div.next a:hover{
 
     padding: 8px 10px;
 
+}
+.desc-container{
+  top:35px;
+  padding:20px 30px 30 30px;
+}
+.work-img-caption{
+  padding-top:20px;
+}
 }
