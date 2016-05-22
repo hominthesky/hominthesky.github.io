@@ -121,6 +121,7 @@ div#loader{
   max-width: 860px;
 
 
+
 }
 
 
@@ -349,20 +350,25 @@ a.emphasis{
   color: #f9838b;
   transition: color 1s;
 }
-@media(max-width:640px) {
+@media(max-width:768px) {
+  .container{
+    margin: 10px;
+    top:199px;
+  }
 
   .txt{
     margin:30px auto 40px auto;
+
   }
   .self-desc p{
-    max-width: 300px;
+    max-width: 80%;
     margin: auto;
     font-weight: 400;
     position: relative;
   }
 #greeting{
   margin: auto;
-  height: 49px;
+  height: 40px;
 }
 
 .links ul{
@@ -371,9 +377,12 @@ a.emphasis{
   display: block;
   margin: 20px auto;
 }
-
+.pre-pic{
+  top:246px;
+}
 .workpic{
-  max-width: 100%;
+  width: 100%;
+  height: 400px;
   margin: 20px auto;
   display: block;
   position: relative;
@@ -382,25 +391,67 @@ a.emphasis{
 .photo-pic{
   position: relative;
   width: 100%;
-  height: 30%;
+  height: 300px;
   margin: 10px auto;
   object-fit: cover;
 
 }
 .work-caption{
-  margin: 245px 20px 27px -35px;
+  margin: 320px 20px 27px -35px;
   width: 100%;
 }
 
+.contact-me{
+  top: 238px;
+}
+
+div.footer{
+  top:280px;
+  padding-bottom: 20px;
+}
 }
 
 
+@media(max-width:640px) {
 
+  .workpic{
+    width: 100%;
+    height: 300px;
+  }
+  .work-caption{
+    margin: 245px 20px 27px -35px;
+    width: 100%;
+  }
+
+}
 @media(max-width:320px) {
+.links ul {
+  margin-left: -40px;
+
+
+}
+
+.txt{
+  margin: 20px;
+}
+.container{
+  margin: 10px;
+    top:199px;
+}
+  #greeting{
+    height: 35px;
+    padding: auto;
+    margin: auto auto auto 20px;
+
+  }
 
   .self-desc p{
     max-width: 280px;
 
+  }
+
+  .pre-pic{
+    top:246px;
   }
   .photo-pic{
     position: relative;
@@ -409,5 +460,12 @@ a.emphasis{
 
   }
 
+  .contact-me{
+    top:238px;
+  }
+div.footer{
+  top:280px;
+  padding-bottom: 20px;
+}
 
 }
