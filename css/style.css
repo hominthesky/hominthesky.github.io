@@ -247,25 +247,28 @@ a.workpic:hover{
 
 /*works updated here*/
 a#work-1{
-  background: url(../img/zhihu-android.png) no-repeat;
+  background: url(../img/zhihu-android/zhihu-android.png) no-repeat;
   background-size: cover;
 
 }
 
 a#work-2{
-  background: url(../img/zhihu-ios7.png) no-repeat;
+  background: url(../img/zhihu-ios7/zhihu-ios7.png) no-repeat;
   background-size: cover;
 }
 
 a#work-3{
-  background: url(../img/travel/3.jpg) no-repeat;
+  background: url(../img/wysummit-2015/cover.jpg) no-repeat;
   background-size: cover;
 }
 
 a#work-4{
-  background: url(../img/travel/4.jpg) no-repeat;
+  background: url(../img/wysummit-2016/cover.jpg) no-repeat;
   background-size: cover;
 }
+
+
+
 /*works*/
 
 
