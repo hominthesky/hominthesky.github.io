@@ -11,7 +11,8 @@
     <link rel="shortcut icon" href="favicon.ico"/>
     <link rel="bookmark" href="favicon.ico"/>
     <link rel="stylesheet" href="./css/style.css" />
-    <link href='https://fonts.googleapis.com/css?family=Roboto+Slab|Lato:400,700,900,300,100|Open+Sans:400,700,800,600,300|Economica:400,700,400italic,700italic' rel="stylesheet">
+    <link href="css/lightbox.css" rel="stylesheet">
+    <link href='https://fonts.googleapis.com/css?family=Slabo+27px|Lato:400,700,900,300,100|Open+Sans:400,700,800,600,300|Economica:400,700,400italic,700italic' rel="stylesheet">
    <script src="js/jquery-1.12.3.min.js"></script>
 
     <!--[if IE]>
@@ -98,25 +99,43 @@ I am a Product Designer and an Illustration Designer. Right now, I'm working in 
 <div class="pic-caption" align=center>Works</div>
   <div class="photo">
     <!-- Work Update -->
-        <a href="wysummit-2016/index.html" class="pic-container workpic" id="work-4"><span class="work-caption" id="caption">Web Design for WHF 2016</span> </a>
-    <a href="wysummit-2015/index.html" class="pic-container workpic" id="work-3"><span class="work-caption" id="caption">Graphic Design for WooYun Summit</span> </a>
-    <a href="zhihu-android/index.html" class="pic-container workpic" id="work-1"><span class="work-caption" id="caption">Zhihu for Android</span> </a>
-    <a href="zhihu-ios7/index.html" class="pic-container workpic" id="work-2"><span class="work-caption" id="caption">Zhihu for iOS 7</span></a>
+        <a href="wysummit-2016/index.html" class="pic-container workpic" id="work-4"><span class="work-caption">Web Design for WHF 2016</span> </a>
+    <a href="wysummit-2015/index.html" class="pic-container workpic" id="work-3"><span class="work-caption">Graphic Design for WooYun Summit</span> </a>
+    <a href="zhihu-android/index.html" class="pic-container workpic" id="work-1"><span class="work-caption">Zhihu for Android</span> </a>
+    <a href="zhihu-ios7/index.html" class="pic-container workpic" id="work-2"><span class="work-caption">Zhihu for iOS 7</span></a>
 
   </div>
 </div>
 
 
 
+<!-- <div class="pre-pic">
+  <div class="pic-caption" align=center>Shooting & Illustation</div>
+  <div class="photo">
+  <a href="img/photo/1.png" data-lightbox="roadtrip" data-title="Illustration-WhiteHat" class="pic-container"><img src="img/photo/1-cover.png" class="photo-pic"></a>
+  <a href="img/photo/2.jpg" data-lightbox="roadtrip" data-title="Illustration" class="pic-container"><img src="img/photo/2-cover.jpg" class="photo-pic"></a>
+  <a href="img/photo/3.png" data-lightbox="roadtrip" data-title="Icon Illustration" class="pic-container"><img src="img/photo/3-cover.png" class="photo-pic"></a>
+  <a href="img/photo/4.jpg" data-lightbox="roadtrip" data-title="Osaka Castle" class="pic-container"><img src="img/photo/4.jpg" class="photo-pic"></a>
+  <a href="img/photo/5.jpg" data-lightbox="roadtrip" data-title="Dotonbori" class="pic-container hidden"></a>
+  <a href="img/photo/6.jpg" data-lightbox="roadtrip" data-title="Taipei Overlook" class="pic-container hidden"></a>
 
 
-<div class="pre-pic">
-  <div class="pic-caption" align=center>Trivial Bits <br><span style="color:#ccc; font-size:0.6em;">Pls Cross GFW and check them</span></div>
-
-  <div id="ins" class="row">
 
 </div>
+</div> -->
 
+<div class="pre-pic">
+  <div class="pic-caption" align=center>Trivial Bits (Pls Cross GFW)</div>
+  <div id="ins" class="row">
+
+
+
+</div>
+<!-- <div id="ins-ins" class="ins-cover">
+
+
+
+</div> -->
 </div>
 
 
@@ -153,20 +172,46 @@ I am a Product Designer and an Illustration Designer. Right now, I'm working in 
 
 
 </script>
+<!-- <script>
 
-<!-- <footer class="footer">
+		var userid = "219758976";
+    var accessToken = "219758976.1677ed0.787897fb29d441d4b891f3d8c4c46b59";
+
+    var instagramBaseUrl = "https://api.instagram.com/v1/users/"+userid+"/media/recent/?&access_token="+accessToken;
+    $.ajax({
+          type:"GET",
+          dataType:"jsonp",
+          cache:false,
+          url: instagramBaseUrl,
+          success:function(data) {
+        console.log(data);
+        var row = $('#ins-ins');
+
+        for(var i=0; i<data.data.length; i++) {
+          var item = $('<a target="_blank" href="'+data.data[i].link+'" class="col-md-2 col-xs-6 t-bits"></a>');
+          row.append(item);
+          var itemWrapper = $('<div class"wrapper"></div>');
+          itemWrapper.append('<img class="thumbnail" src="'+data.data[i].images.standard_resolution.url+'" />');
+          itemWrapper.append('<img class="blank" src="img/blank_360x360.svg" />');
+          item.append(itemWrapper);
+        }
+      },
+      error: function(data){
+          console.log('error',data); // send the error notifications to console
+      }
+    });
+
+
+</script> -->
+
+
+<!-- <div class="contact-me">
+  If you’ve gone through all the projects (you absolutely should read them first, they are really quite nice ;) and still want to know more about me or my work or want to hire me or talk about your project with me. Just feel free to <a class="emphasis" href="&#109;&#97;&#105;&#108;&#116;&#111;&#58;&#104;&#111;&#109;&#105;&#110;&#116;&#104;&#101;&#115;&#107;&#121;&#64;&#103;&#109;&#97;&#105;&#108;&#46;&#99;&#111;&#109;&#10;">contact me</a> :)
+</div> -->
+
+<div class="footer">
   Copyright © 2016 HungI-zzZ.
-</footer> -->
-
-  <div class="bottom" align=center>
-    <ul>
-      <li><a href="resume.html">/Résumé</a></li>
-      <li><a href="&#109;&#97;&#105;&#108;&#116;&#111;&#58;&#104;&#111;&#109;&#105;&#110;&#116;&#104;&#101;&#115;&#107;&#121;&#64;&#103;&#109;&#97;&#105;&#108;&#46;&#99;&#111;&#109;&#10;">/Mail Me<a/></li>
-    </ul>
-  </div>
-
-
-
+</div>
 
 
 </div>
@@ -174,7 +219,17 @@ I am a Product Designer and an Illustration Designer. Right now, I'm working in 
 
 
 <script src="js/parallax.min.js"></script>
+<script src="js/lightbox.js"></script>
+<script>
+    lightbox.option({
+      'resizeDuration': 200,
+      'wrapAround': false,
+      'alwaysShowNavOnTouchDevices':false,
+      'fitImagesInViewport':true,
 
+
+    })
+</script>
 
 </body>
 </html>

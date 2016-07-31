@@ -1,12 +1,12 @@
 body{
   background-color: #fff;
-  overflow:scroll;
   width: 100%;
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.7em;
+  font-weight: 400;
   color: rgba(0,0,0,0.7);
-  font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,Cantarell,"Open Sans","Helvetica Neue",sans-serif;
+  font-family: "Lato",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,Cantarell,"Open Sans","Helvetica Neue",sans-serif;
 }
 
 .parallax-container {
@@ -107,7 +107,7 @@ div#loader{
   /*box-shadow: 0 0 10px rgba(0, 0, 0, 0.14), 0 2px 2px rgba(0, 0, 0, 0.11);*/
 
   color: #666;
-  top: 260px;
+  top: 240px;
   background: none;
 
 }
@@ -117,7 +117,7 @@ div#loader{
   max-width: 338px;
   height: 53px;
   display: block;
-  margin: 60px auto 20px 80px;
+  margin: 60px auto 40px 80px;
   max-width: 860px;
 
 
@@ -210,6 +210,11 @@ a.pic-container img: hover{
 
 }
 
+.appear{
+  opacity: 1;
+}
+
+
 
 .photo-pic{
   height: 200px;
@@ -235,10 +240,15 @@ a.workpic{
 
 }
 
+/*#work-1:hover,#work-2:hover,#work-3:hover,#work-4:hover,.work-caption:hover{
+  -webkit-transition: all 1000ms ease;
+  -moz-transition: all 1000ms ease;
+}*/
 a.workpic:hover{
+
   border-radius: 0px;
-  /*box-shadow: 0 0 2px rgba(0, 0, 0, 0.30), 0 2px 4px rgba(0, 0, 0, 0.11), 0px 0px 300px 300px rgba(0, 0, 0, 0.2) inset;*/
-  box-shadow: 0px 0px 300px 300px rgba(0, 0, 0, 0.2) inset;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.30), 0 2px 4px rgba(0, 0, 0, 0.11), 0px 0px 300px 300px rgba(0, 0, 0, 0.2) inset;
+  /*box-shadow: 0px 0px 300px 300px rgba(0, 0, 0, 0.2) inset;*/
   transition: box-shadow 0.3s;
 }
 
@@ -267,6 +277,12 @@ a#work-4{
   background-size: cover;
 }
 
+/*#work-1:hover,#work-2:hover,#work-3:hover,#work-4:hover{
+  background: #333;
+  background-size: cover;
+
+}*/
+
 
 
 /*works*/
@@ -277,7 +293,7 @@ a#work-4{
   position: relative;
   margin: auto auto 50px auto;
   display: block;
-  top: 300px;
+  top: 280px;
 }
 
 
@@ -285,26 +301,147 @@ a#work-4{
 
 .pic-caption{
   position: relative;
-  max-width: 900px;
-  font-weight: 700;
-  font-size: 20px;
-  margin-bottom: 20px;
-  font-family: 'Lato', sans-serif;
   text-align: center;
-  text-transform: uppercase;
+  margin-bottom: 1em;
+  margin-left: auto;
+  margin-right: auto;
+  padding-bottom: 1.4em;
 }
 
+.pic-caption,.bottom{
+  max-width: 850px;
+  font-weight: 700;
+  font-size: 20px;
+  font-family: 'Lato', sans-serif;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+
+  border-bottom: solid #444 2px;
+
+}
+
+.bottom{
+  position: relative;
+  bottom: -420px;
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: 40px;
+  text-align:left;
+  padding-bottom: 1em;
+
+}
+
+.bottom ul{
+  display: block;
+  margin: auto;
+  position: relative;
+  text-align: right;
+}
+
+.bottom li{
+  display: inline-block;
+  padding: 0.8em 0.8em 0.2em;
+}
+
+.bottom li a{
+  color: rgba(0,0,0,0.7);
+  text-decoration: none;
+}
+
+.bottom li a:hover{
+  color: #f54955;
+  transition: color 1s;
+}
 
 .photo{
   max-width: 860px;
-  padding: 10px;
+  padding: 0px 10px 10px;
   position: relative;
   margin: auto;
   display: block;
 
 }
 
+/*ins*/
 
+#ins{
+  display: block;
+  max-width: 860px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: auto;
+  box-sizing: border-box;
+
+}
+
+/*
+div.ins-cover {
+  display: block;
+  position: relative;
+  z-index: 999;
+  float: left;
+  margin-top: -300px;
+  -webkit-filter: grayscale(100%);
+  -webkit-transition: 0.2s -webkit-filter;
+  -webkit-transform: translate3d(0, 0, 0);
+}*/
+
+.thumbnail {
+    position: absolute;
+    max-height: 100%;
+}
+
+.row img {
+    max-width: 100%;
+    float: left;
+    box-sizing: content-box;
+
+
+
+}
+
+
+
+
+
+.t-bits {
+    margin:0px 3px 6px;
+    box-sizing: border-box;
+    position: relative;
+    float: left;
+    display: block;
+    width: 101px; /*166 is ok as well*/
+
+
+}
+.row::before{
+  content: " ";
+display: table;
+}
+.row::after{
+  content: " ";
+display: table;
+}
+
+a.t-bits{
+  -webkit-filter: grayscale(1);
+  -webkit-filter: grayscale(100%);
+  filter: gray;
+  filter: grayscale(100%);
+  filter: url(../desaturate.svg#greyscale);
+
+}
+
+a.t-bots:hover{
+  -webkit-filter: grayscale(0);
+  -webkit-filter: grayscale(0%);
+  filter: none;
+  filter: grayscale(0%);
+}
+
+
+
+/*ins*/
 
 a.hidden{
   display: none;
@@ -312,16 +449,16 @@ a.hidden{
 
 
 
-div.footer{
-  position: relative;
+/*footer.footer{
+  position: absolute;
   display: block;
-  margin: auto auto 50px auto;
+  margin: auto;
   width: 100%;
   text-align: center;
-  top: 340px;
+  font-size: 13px;
   padding-bottom: 40px;
   bottom: 20px;
-}
+}*/
 
 /*present*/
 
@@ -332,10 +469,10 @@ div.footer{
   position: relative;
   text-align: left;
   top: 280px;
-  font-size: 1.2em;
+  font-size: 1.1em;
   color: #666;
-  font-family: "Lato" sans-serif;
-  font-weight: 300;
+  font-family: "Lato", sans-serif;
+  font-weight: 400;
   line-height: 1.5em;
   padding: 10px;
   cursor: default;
@@ -353,6 +490,9 @@ a.emphasis{
   color: #f9838b;
   transition: color 1s;
 }
+
+
+
 @media(max-width:768px) {
   .container{
     margin: 10px;
@@ -383,6 +523,9 @@ a.emphasis{
 .pre-pic{
   top:246px;
 }
+.pic-caption,.bottom{
+  max-width: 95%;
+}
 .workpic{
   width: 100%;
   height: 400px;
@@ -402,6 +545,7 @@ a.emphasis{
 .work-caption{
   margin: 320px 20px 27px -35px;
   width: 100%;
+
 }
 
 .contact-me{
@@ -412,6 +556,40 @@ div.footer{
   top:280px;
   padding-bottom: 20px;
 }
+#ins{
+
+  max-width: 95%;
+}
+.row img {
+    max-width: 100%;
+    float: left;
+    box-sizing: content-box;
+
+}
+
+.t-bits {
+    margin:0px 1% 2%;
+    box-sizing: border-box;
+    position: relative;
+    float: left;
+    display: block;
+    width: 48%; /*166 is ok as well*/
+
+
+}
+.bottom{
+  position: relative;
+  bottom: -300px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.bottom ul{
+  text-align: center;
+  margin: auto;
+  padding: 0px;
+}
+
+
 }
 
 
