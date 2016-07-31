@@ -24,6 +24,7 @@ div#loader{
 .everything{
   width:100%;
   position: relative;
+  padding-bottom: 20px;
 }
 
 /*logo*/
@@ -326,8 +327,11 @@ a#work-4{
   margin-left: auto;
   margin-right: auto;
   margin-bottom: 40px;
+  -webkit-margin-bottom:40px;
+  -moz-margin-bottom:40px;
   text-align:left;
   padding-bottom: 1em;
+  z-index: -1;
 
 }
 
@@ -371,6 +375,7 @@ a#work-4{
   margin-right: auto;
   padding: auto;
   box-sizing: border-box;
+  z-index: 100;
 
 }
 
@@ -401,7 +406,9 @@ div.ins-cover {
 }
 
 
-
+.blank{
+  margin: 0;
+}
 
 
 .t-bits {
@@ -411,6 +418,7 @@ div.ins-cover {
     float: left;
     display: block;
     width: 101px; /*166 is ok as well*/
+    -moz-height: 101px;
 
 
 }
@@ -562,6 +570,7 @@ div.footer{
 }
 .row img {
     max-width: 100%;
+    -moz-width: 100%;
     float: left;
     box-sizing: content-box;
 
@@ -576,12 +585,15 @@ div.footer{
     width: 48%; /*166 is ok as well*/
 
 
+
 }
 .bottom{
   position: relative;
   bottom: -300px;
   margin-left: auto;
   margin-right: auto;
+  margin-bottom: 40px;
+
 }
 .bottom ul{
   text-align: center;
