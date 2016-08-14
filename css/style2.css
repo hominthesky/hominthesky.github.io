@@ -102,6 +102,7 @@ ul.info{
 .info li a{
   text-decoration: none;
   color: rgba(0, 0, 0, 0.7);
+  transition: color 1s;
 }
 
 .info li a:hover{
