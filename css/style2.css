@@ -58,6 +58,7 @@
 .work-navbar li a{
   color: #444;
   text-decoration: none;
+  transition: color 1.1s;
 }
 
 
