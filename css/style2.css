@@ -249,6 +249,7 @@ div.next{
 div.next a{
   color: #f54955;
   text-decoration: none;
+  transition: color 1s;
 }
 
 
