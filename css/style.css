@@ -420,13 +420,13 @@ div.ins-cover {
 
 
 .t-bits {
-    margin:0px 3px 6px;
+    margin: 1px 3px 6px;
     box-sizing: border-box;
     position: relative;
     float: left;
     display: block;
-    width: 101px; /*166 is ok as well*/
-    -moz-height: 101px;
+    width: 165px; /*166 is ok as well*/
+    -moz-height: 165px;
 
 
 
