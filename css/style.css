@@ -219,13 +219,6 @@ a.pic-container img: hover{
 
 
 
-.photo-pic{
-  height: 200px;
-  width: 200px;
-  margin: 6px;
-  padding: 0px;
-
-}
 
 .workpic{
 width: 420px;
@@ -263,6 +256,12 @@ a.workpic:hover{
 
 
 /*works updated here*/
+a#work-0{
+  background: url(../img/gallery/cover.jpg) no-repeat;
+  background-size: cover;
+}
+
+
 a#work-1{
   background: url(../img/zhihu-android/zhihu-android.png) no-repeat;
   background-size: cover;
@@ -555,14 +554,7 @@ a.emphasis{
   position: relative;
 }
 
-.photo-pic{
-  position: relative;
-  width: 100%;
-  height: 300px;
-  margin: 10px auto;
-  object-fit: cover;
 
-}
 .work-caption{
   margin: 320px 20px 27px -35px;
   width: 100%;
@@ -661,7 +653,7 @@ div.footer{
   }
   .photo-pic{
     position: relative;
-    height: 25%;
+    height: 40%;
 
 
   }
