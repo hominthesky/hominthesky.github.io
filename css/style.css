@@ -576,6 +576,18 @@ a.emphasis{
 }
 
 @media(max-width:880px) {
+  .works {
+    width: 90%;
+    height: 400px;
+    position: relative;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    margin-top: 20px;
+    margin-bottom: 20px;
+    background-size: contain;
+    }
+
   .container{
     margin: 10px;
     top:199px;
@@ -678,10 +690,18 @@ div.footer{
     width: 100%;
     height: 300px;
   }
-
+  .works {
+    width: 90%;
+    height: 240px;}
 
 }
 @media(max-width:320px) {
+
+
+.works {
+  width: 90%;
+  height: 180px;
+}
 .links ul {
   margin-left: -40px;
 
