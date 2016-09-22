@@ -81,7 +81,9 @@
   width: 100%;
   margin: 80px auto auto auto;
 }
-
+p {
+  text-align: left;
+}
 ul.info{
   max-width: 600px;
   position: relative;
