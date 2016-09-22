@@ -14,6 +14,12 @@
     <link rel="stylesheet" href="./css/style.css" />
     <link href='https://fonts.googleapis.com/css?family=Roboto+Slab|Lato:400,700,900,300,100|Open+Sans:400,700,800,600,300|Economica:400,700,400italic,700italic' rel="stylesheet">
    <script src="js/jquery-1.12.3.min.js"></script>
+     <script>
+      $(document).ready(function(){
+      $("#parallax-container").fadeIn(1000);
+      $("#everything").fadeIn(1000);
+        });
+</script>
 
     <!--[if IE]>
   		<script type="text/javascript">
@@ -45,9 +51,9 @@
 
 
 <!-- loading animation -->
-<div class="parallax-container" data-parallax="scroll" data-position="top" data-bleed="10" speed="0.3" data-image-src="img/bg@3x.png"  style="object-fit:contain;" data-natural-width="2674" data-natural-height="2282">
+<div class="parallax-container" id="parallax-container" data-parallax="scroll" data-position="top" data-bleed="10" speed="0.3" data-image-src="img/bg@3x.png"  style="object-fit:contain;" data-natural-width="2674" data-natural-height="2282">
 
-<div class="everything">
+<div class="everything" id="everything">
 <div class="zz" width=230 height=60 >
   <a href="index.html" width=230 height=60><span>logo</span></a>
 </div>

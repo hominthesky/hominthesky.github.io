@@ -7,6 +7,7 @@ body{
 }
 
 
+
 body,span{
   font-size: 12px;
   line-height: 1.4em;
@@ -30,7 +31,9 @@ span{
   border-radius: 2px;
   background: #fff;
 }
-
+div#everything{
+  display: none;
+}
 .title{
   font-size: 22px;
   padding-bottom: 20px;
