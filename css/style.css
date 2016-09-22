@@ -512,12 +512,12 @@ display: table;
 
 .t-bits{
   -webkit-filter: grayscale(100%);
-  -webkit-transition: 0.15s -webkit-filter;
+  -webkit-transition: 0.5s -webkit-filter;
 }
 
 .t-bits:hover{
   -webkit-filter: grayscale(0%);
-  -webkit-transition: 0.15s -webkit-filter;
+  -webkit-transition: 0.5s -webkit-filter;
 
 }
 
