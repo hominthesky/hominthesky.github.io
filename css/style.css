@@ -401,6 +401,7 @@ a#work-7{
   text-align:left;
   padding-bottom: 1em;
   z-index: -1;
+  top: 330;
 
 }
 
@@ -533,13 +534,14 @@ a.hidden{
 div.footer{
   position: relative;
   display: block;
-  margin: auto;
+  margin-left: auto;
+  margin-right: auto;
   width: 100%;
   text-align: center;
   font-size: 13px;
   padding-bottom: 40px;
   bottom: 20px;
-  top: 300px;
+  top: 320px;
 }
 
 /*present*/
@@ -640,7 +642,7 @@ a.emphasis{
 }
 
 div.footer{
-  top:280px;
+  top: 330px;
   padding-bottom: 20px;
 }
 #ins{
@@ -750,8 +752,8 @@ div.footer{
     top:238px;
   }
 div.footer{
-  top:280px;
-  padding-bottom: 20px;
+  top: 330px;
+  padding-bottom: 40px;
 }
 
 }
