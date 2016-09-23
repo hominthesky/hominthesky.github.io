@@ -18,6 +18,7 @@
       $(document).ready(function(){
       $("#parallax-container").fadeIn(2500);
       $("#everything").fadeIn(2500);
+      $("#loader").fadeOut(2000);
         });
 </script>
 
@@ -40,12 +41,15 @@
 
 <body>
 <!-- loading animation -->
-  <div id=loader>
-  <div class=wait>
-  <i></i>
-  loading...
+<div id="loader">
+  <div id="loading-center">
+    <div id="loading-center-absolute">
+      <div class="object" id="object_one"></div>
+      <div class="object" id="object_two"></div>
+      <div class="object" id="object_three"></div>
+    </div>
   </div>
-  </div>
+</div>
 
 
 

@@ -20,6 +20,7 @@
     <script>
      $(document).ready(function(){
      $("#everything").fadeIn(3000);
+     $("#loader").fadeOut(2000);
    });
    </script>
 
@@ -43,14 +44,15 @@
 <body>
 <!-- loading animation -->
 
-  <div id="loader">
-  <div class="wait">
-  <i></i>
-  loading...
+<div id="loader">
+  <div id="loading-center">
+    <div id="loading-center-absolute">
+      <div class="object" id="object_one"></div>
+      <div class="object" id="object_two"></div>
+      <div class="object" id="object_three"></div>
+    </div>
   </div>
-  </div>
-
-
+</div>
 
 
 <!-- loading animation -->
@@ -192,7 +194,7 @@ I’m afraid this case study is just about over. But I've prepared a few more fo
 
 
 <div class="footer">
-  Copyright © 2016 HungI-zzZ.
+  Design &amp; Code by © 2016 HungI-zzZ.
 </div>
 
 
