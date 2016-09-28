@@ -1,3 +1,3 @@
 hominthesky.github.io
 =====================
-This is my portfolio: http://zzao.im 
+This is my personal site: http://zzao.im 
