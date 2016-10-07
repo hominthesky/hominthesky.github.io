@@ -739,18 +739,26 @@ letter-spacing: 1px;
 
 }
 
-#ins{
+#ins,#more-work {
 	position: relative;
-	top: 40px;
   max-width: 100%;
 	margin-left: auto;
 	margin-right: auto;
   display: block;
   /*flex-wrap: wrap;*/
   /*justify-content: center;*/
-	background-color: #f3ebdd;
+
 	clear: both;
 	overflow: hidden;
+}
+
+#ins {
+		top: 40px;
+		background-color: #f3ebdd;
+}
+
+#more-work {
+	 background-color: #cbe9ee;
 }
 
 .wrapper {
@@ -795,16 +803,23 @@ letter-spacing: 1px;
 }
 
 
- #triangle {
+ #triangle,#triangle3 {
 	position: relative;
  	width: 0;
  	height: 0;
- 	bottom: 30px;
  	display: block;
  	border-bottom: 70px solid #fff;
  	border-left: 100vw solid transparent;
  	z-index: 500;
  	overflow: hidden;
+	 }
+
+	 #triangle{
+		 	bottom: 30px;
+	 }
+
+	 #triangle3{
+		 bottom: 70px;
 	 }
 
 /*ins*/
@@ -853,7 +868,7 @@ letter-spacing: 1px;
 section#footer{
 	font-size: 12px;
 	color: #888;
-	letter-spacing: 0px;
+	letter-spacing: 1px;
 	/*text-transform: uppercase;
 	font-family: 'Brandon',sans-serif;*/
 	font-weight: 300;
@@ -1053,7 +1068,13 @@ h2.folio-head{
 	top: 32px;
 	width: 30%;
 }
-
+section.full-footer{
+	display: none;
+}
+section.mini-footer{
+	display: block;
+	visibility: visible;
+}
 }
 
 @media (max-width:320px) {
