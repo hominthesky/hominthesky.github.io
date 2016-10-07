@@ -83,7 +83,7 @@ p.w-light, .w-light {
 }
 
 .work-details{
-  max-width: 1280px;
+
   position: relative;
   display: block;
   margin-left: auto;
@@ -140,6 +140,7 @@ h2.work-name {
   z-index: 999;
   margin: 0;
   display: block;
+  width: 100%;
 }
 
 .work-details a.button.normal {
