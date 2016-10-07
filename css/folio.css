@@ -379,6 +379,10 @@ section.narrow-w {
 	clear: both;
 }
 
+#triangle3{
+  border-bottom: 70px solid #fff;
+  bottom:70px;
+}
 
 @media (max-width:700px){
   #folio-intro{
