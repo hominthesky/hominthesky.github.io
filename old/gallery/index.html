@@ -18,9 +18,9 @@
     <link href='https://fonts.googleapis.com/css?family=Slabo+27px|Lato:400,700,900,300,100|Open+Sans:400,700,800,600,300|Economica:400,700,400italic,700italic' rel='stylesheet' type='text/css'>
     <script>
      $(document).ready(function(){
-     $("#everything").fadeIn(3000);
+     $("#everything").fadeIn(2500);
      $("#loader").fadeOut(1000);
-   });
+       });
    </script>
 
     <!--[if IE]>
@@ -41,22 +41,17 @@
 </head>
 
 <body>
-<!-- loading animation -->
-
-<div id="loader">
-  <div id="loading-center">
-    <div id="loading-center-absolute">
-      <div class="object" id="object_one"></div>
-      <div class="object" id="object_two"></div>
-      <div class="object" id="object_three"></div>
+  <!-- loader -->
+  <div id="loader">
+      <div class="loader-center">
+        <div class="loader-center-absolute">
+          <span class="dot"></span>
+        </div>
     </div>
   </div>
-</div>
 
-
-<!-- loading animation -->
-
-<div class="everything" id="everything">
+<!-- loader -->
+<div class="everything" id="everything" class="appearing">
 
 
 <!-- navi -->

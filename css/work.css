@@ -90,8 +90,73 @@ div.p-pic {
     background-image: url(../img/wysummit-2016/hero.jpg);
 }
 
+#p3{
+    background-image: url(../img/wyreport-2015/hero.jpg);
+}
+
+#p4{
+    background-image: url(../img/wysummit-2015/hero.jpg);
+}
+
+#p5{
+    background-image: url(../img/zh-promo/hero.jpg);
+}
+
+#p6{
+    background-image: url(../img/zhihu-android/hero.png);
+}
+
+#p7{
+    background-image: url(../img/zhihu-ios7/hero.png);
+}
+
 .p2-w{
   background-color: #f0744e;
+}
+
+
+.p3-w{
+  background-color: #5bc7c9;
+}
+
+.p4-w {
+  background-color: #0f1837;
+}
+
+.p5-w {
+  background-color: #00adef;
+}
+
+.p6-w {
+  background-color: #f1f1f1;
+}
+.p7-w {
+  background-color: #0077d9;
+}
+
+p b{
+  font-weight: bold;
+}
+
+#p-info a{
+  color:#777;
+  transition: 1s color;
+}
+
+#p-info a:hover {
+  color: #333;
+  transition: 1s color;
+}
+
+ #p-info a.z-ios7 {
+  color: #f5f5f5;
+  transition: 1s color;
+
+}
+
+#p-info a.z-ios7:hover {
+  color: #ccc;
+  transition: 1s color;
 }
 
 h3 {
@@ -216,14 +281,16 @@ section.present img{
   letter-spacing: 1px;
 }
 
-.p-content p, .p-content h2{
+.p-content p, .p-content h2, .p-content h3{
   padding: 0 10px;
 
 }
-.p-content p{
+.p-content p, .p-content h3{
 margin-top: 15px;
 margin-bottom: 20px;
 }
+
+
 
 .p-content img {
 
@@ -243,6 +310,14 @@ img.full {
   width: 960px;
 }
 
+div#p-1.w-full {
+    background-color: #ffb727;
+}
+
+div#a-is.w-full {
+  background-color: #f5f5f5;
+}
+
 div.w-full{
   width: 100vw;
   top: 20px;
@@ -251,7 +326,7 @@ div.w-full{
   border: 0;
   display: block;
   position: relative;
-  background-color: #ffb727;
+
 }
 
 
