@@ -23,6 +23,15 @@ section.work-container {
 
 }
 
+section#work-0 {
+  background: #6574a8;
+  background-image: url(../img/portfolio/cover-0@2x.jpg);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+}
+
+
 section#work-1 {
   background: #f1bd57;
   background-image: url(../img/portfolio/cover-1@2x.png);
@@ -103,6 +112,10 @@ img.product-pic
   margin-bottom: 0;
 }
 
+.work-0 {
+  max-width: 250px;
+  top: 110px;
+}
 .work-1 {
   max-width: 800px;
   top: 315px;

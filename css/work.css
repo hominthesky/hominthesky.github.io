@@ -82,6 +82,10 @@ div.p-pic {
   background-size: cover;
 }
 
+#p0{
+    background-image: url(../img/wysec/hero.jpg);
+}
+
 #p1{
     background-image: url(../img/tangsec/hero.jpg);
 }
@@ -108,6 +112,10 @@ div.p-pic {
 
 #p7{
     background-image: url(../img/zhihu-ios7/hero.png);
+}
+
+.p0-w{
+  background-color: #6575a8;
 }
 
 .p2-w{
@@ -302,7 +310,8 @@ margin-bottom: 20px;
 
 img.normal {
   width: 800px;
-  max-width: 100%;
+  max-width: 95%;
+
 }
 
 img.full {
@@ -557,6 +566,19 @@ section#footer {
   height: 90px;
 }
 
+div.video{
+
+  display: block;
+  position: relative;
+  margin-left: 12px;
+  margin-right: 12px;
+  margin-bottom: 100px;
+}
+
+.video iframe{
+  width: 640px;
+  height: 360px;
+}
 
 @media (max-width:1080px) {
 
@@ -649,6 +671,18 @@ a .next img {
   }
 a .previous img {
     max-width: 35%;
+}
+
+div.video{
+  max-width: 90%;
+  display: block;
+  position: relative;
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: 100px;
+}
+.video iframe{
+  max-width:100%;
 }
 }
 

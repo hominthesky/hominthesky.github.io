@@ -457,6 +457,11 @@ a#work-7{
   background: url(../../img/tangsec/cover.jpg) no-repeat;
   background-size: cover;
 }
+
+a#work-8{
+  background: url(../../img/wysec/cover.jpg) no-repeat;
+  background-size: cover;
+}
 /*#work-1:hover,#work-2:hover,#work-3:hover,#work-4:hover{
   background: #333;
   background-size: cover;
