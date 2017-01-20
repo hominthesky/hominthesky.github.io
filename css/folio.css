@@ -66,6 +66,14 @@ section#work-5 {
   background-size: cover;
 }
 
+section#work-6 {
+  background: #fff;
+  background-image: url(../img/portfolio/cover-6@2x.jpg);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+}
+
 /*center elements*/
 .bg, img.product-pic, .work-details .button, .work-name, .my-role, .work-desc {
   position: absolute;
@@ -164,12 +172,20 @@ h2.work-name {
   top: 220px;
 }
 
+.work-details a.button.switch-s {
+  top: 275px;
+}
+
 .work-name.normal{
   top: 385px;
 }
 
 .work-name.switch{
   top: 130px;
+}
+
+.work-name.switch-s{
+  top: 405px;
 }
 
 
@@ -182,7 +198,10 @@ h2.work-name {
   top: 170px;
 }
 
+.work-desc.switch-s {
 
+  top: 225px;
+}
 
 .my-role, .work-desc {
   font-size: 13px;
