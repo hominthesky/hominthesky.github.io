@@ -74,6 +74,14 @@ section#work-6 {
   background-size: cover;
 }
 
+section#work-7 {
+  background: #fff;
+  background-image: url(../img/portfolio/cover-6@2x.jpg);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+}
+
 /*center elements*/
 .bg, img.product-pic, .work-details .button, .work-name, .my-role, .work-desc {
   position: absolute;
