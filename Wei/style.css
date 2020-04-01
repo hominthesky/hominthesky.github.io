@@ -1,0 +1,74 @@
+@keyframes fadeInUp {
+  0% {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.appearing {
+  animation: fadeInUp 1.5s;
+  animation-timing-function: cubic-bezier(0.74, 0.04, 0.55, 0.95);
+}
+body {
+  color: rgba(0, 0, 0, 0.87);
+  font-size: 13px;
+  background-color: #fbfbfb;
+  margin: 0;
+  padding: 0;
+  background-color: #37373d;
+}
+
+div#content-container img {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: block;
+  position: relative;
+  margin: 64px auto;
+  z-index: 999;
+}
+
+img#bg-1 {
+  z-index: 1;
+  position: fixed;
+  margin-left: 32px;
+  margin-bottom: 32px;
+  bottom: 0px;
+  left: 0px;
+}
+
+img#bg-2 {
+  z-index: 1;
+  position: fixed;
+  float: left;
+  margin-right: 32px;
+  margin-top: 32px;
+  top: 0px;
+  right: 0;
+}
+
+@keyframes icon-move {
+  0% {
+    transform: translateY(-4px);
+  }
+  50% {
+    transform: translateY(8px);
+  }
+  to {
+    transform: translateY(-4px);
+  }
+}
+
+img#image-3 {
+  animation: icon-move 2s;
+  animation-timing-function: cubic-bezier(0.74, 0.04, 0.55, 0.95);
+  animation-iteration-count: infinite;
+  position: fixed;
+  display: block;
+  float: left;
+  top: 0;
+  right: 160px;
+  margin-top: 120px;
+  z-index: 1000;
+}
