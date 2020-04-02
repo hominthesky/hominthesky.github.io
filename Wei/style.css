@@ -16,7 +16,7 @@ body {
   background-color: #fbfbfb;
   margin: 0;
   padding: 0;
-  background-color: #37373d;
+  background-color: #f6f8fa;
 }
 
 div#content-container img {
@@ -27,6 +27,7 @@ div#content-container img {
   position: relative;
   margin: 64px auto;
   z-index: 999;
+  max-width: 90%;
 }
 
 img#bg-1 {
@@ -46,6 +47,28 @@ img#bg-2 {
   margin-top: 32px;
   top: 0px;
   right: 0;
+}
+
+img#bg-3 {
+  z-index: 0;
+  position: fixed;
+  float: left;
+  margin-right: 32px;
+  margin-bottom: 32px;
+  bottom: 0px;
+  right: 0;
+  opacity: 0.3;
+}
+
+img#bg-4 {
+  z-index: 0;
+  position: fixed;
+  margin-left: -160px;
+  margin-top: 96px;
+  top: 0px;
+  left: 0px;
+  transform: rotate(90deg);
+  opacity: 0.3;
 }
 
 @keyframes icon-move {
@@ -69,6 +92,57 @@ img#image-3 {
   float: left;
   top: 0;
   right: 160px;
-  margin-top: 120px;
+  margin-top: 160px;
   z-index: 1000;
+}
+
+@media (max-width: 1240px) {
+  img#image-3 {
+    right: 80px;
+    margin-top: 160px;
+  }
+}
+
+@media (max-width: 1080px) {
+  img#image-3 {
+    width: 120px !important;
+    right: 20px;
+    margin-top: 160px;
+  }
+}
+
+@media (max-width: 880px) {
+  img#image-3 {
+    width: 80px !important;
+    right: 16px;
+    margin-top: 160px;
+  }
+}
+
+@media (max-width: 640px) {
+  img#image-3 {
+    width: 48px !important;
+    right: 8px;
+    margin-top: 160px;
+  }
+}
+
+@media (max-width: 512px) {
+  img#image-3 {
+    width: 32px !important;
+    right: 16px;
+    margin-top: 96px;
+  }
+
+  img#bg-1 {
+    margin-left: 16px;
+    margin-bottom: 16px;
+    width: 320px !important;
+  }
+
+  img#bg-2 {
+    margin-right: 16px;
+    margin-top: 16px;
+    width: 200px !important;
+  }
 }
