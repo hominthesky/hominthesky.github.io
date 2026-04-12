@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chief of Staff - Weekly Roadmap</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #0f172a; /* Slate 900 */
+            color: #f8fafc; /* Slate 50 */
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .swimlane-title {
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            transform: rotate(180deg);
+        }
+
+        /* Horizontal scroll snap for mobile swimlanes */
+        .mobile-scroll {
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
+        }
+        .mobile-scroll > * {
+            scroll-snap-align: start;
+        }
+
+        /* 隐秘的滚动条 */
+        ::-webkit-scrollbar {
+            height: 6px;
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="mb-6 md:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-end border-b border-slate-700 pb-4 gap-2">
+        <div>
+            <h1 class="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-white mb-1">本周战略全局图谱 <span class="text-slate-500 text-sm md:text-lg font-normal">| 4.13 - 4.19</span></h1>
+            <p class="text-slate-400 text-xs sm:text-sm">首席幕僚长系统 (Chief of Staff System) · 绝对控盘模式</p>
+        </div>
+        <div class="text-left sm:text-right">
+            <p class="text-emerald-400 font-mono text-xs sm:text-sm tracking-widest">STATUS: MERCENARY MODE ACTIVE</p>
+            <p class="text-slate-500 text-xs mt-1">"Rest & Vest" Protocol Initiated</p>
+        </div>
+    </header>
+
+    <!-- ==================== DESKTOP LAYOUT (md+) ==================== -->
+    <div class="hidden md:block flex-grow overflow-x-auto">
+        <div class="min-w-[1000px]">
+            <!-- Day Headers -->
+            <div class="grid grid-cols-8 gap-4 mb-4 text-center">
+                <div class="col-span-1"></div>
+                <div class="col-span-1 glass-panel rounded-lg py-2 border-t-2 border-slate-500 text-slate-300">
+                    <div class="font-bold text-lg">周一 (今日)</div>
+                    <div class="text-xs text-slate-500">4.13</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg py-2 border-t-2 border-orange-500 text-orange-400 font-bold bg-orange-950/20">
+                    <div class="text-lg">周二</div>
+                    <div class="text-xs text-orange-500/70">4.14 · 高能日</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg py-2 border-t-2 border-orange-500 text-orange-400 font-bold bg-orange-950/20">
+                    <div class="text-lg">周三</div>
+                    <div class="text-xs text-orange-500/70">4.15 · 高能日</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg py-2 border-t-2 border-orange-500 text-orange-400 font-bold bg-orange-950/20">
+                    <div class="text-lg">周四</div>
+                    <div class="text-xs text-orange-500/70">4.16 · 高能日</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg py-2 border-t-2 border-slate-500 text-slate-300">
+                    <div class="font-bold text-lg">周五</div>
+                    <div class="text-xs text-slate-500">4.17</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg py-2 border-t-2 border-slate-500 text-slate-300">
+                    <div class="font-bold text-lg">周六</div>
+                    <div class="text-xs text-slate-500">4.18</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg py-2 border-t-2 border-slate-500 text-slate-300">
+                    <div class="font-bold text-lg">周日</div>
+                    <div class="text-xs text-slate-500">4.19</div>
+                </div>
+            </div>
+
+            <!-- Swimlane: Health & Energy -->
+            <div class="grid grid-cols-8 gap-4 mb-4">
+                <div class="col-span-1 flex items-center justify-center glass-panel rounded-lg bg-slate-800/50">
+                    <span class="swimlane-title font-bold tracking-widest text-emerald-400">生命线 / 能量</span>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-emerald-500">
+                    <div class="text-xs font-bold text-emerald-400 mb-1">🍃 低碳日</div>
+                    <div class="text-xs text-slate-300 mb-2">补剂A组</div>
+                    <div class="text-xs bg-slate-700/50 p-1 rounded text-center text-slate-400">18:00 GABA</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-orange-500 bg-orange-900/10 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-8 h-8 bg-orange-500/20 rounded-bl-full flex justify-center items-center"><span class="text-xs">🥊</span></div>
+                    <div class="text-xs font-bold text-orange-400 mb-1">🔥 高碳日</div>
+                    <div class="text-xs text-slate-300 mb-2">补剂A组</div>
+                    <div class="text-xs bg-slate-700/50 p-1 rounded text-center text-slate-400 mb-1">18:00 GABA</div>
+                    <div class="text-xs font-bold bg-orange-500 text-white p-1 rounded text-center">19:50 BODYCOMBAT</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-orange-500 bg-orange-900/10 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-8 h-8 bg-orange-500/20 rounded-bl-full flex justify-center items-center"><span class="text-xs">🥊</span></div>
+                    <div class="text-xs font-bold text-orange-400 mb-1">🔥 高碳日</div>
+                    <div class="text-xs text-slate-300 mb-2">补剂B组</div>
+                    <div class="text-xs bg-slate-700/50 p-1 rounded text-center text-slate-400 mb-1">18:00 GABA</div>
+                    <div class="text-xs font-bold bg-orange-500 text-white p-1 rounded text-center">19:50 BODYCOMBAT</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-orange-500 bg-orange-900/10 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-8 h-8 bg-orange-500/20 rounded-bl-full flex justify-center items-center"><span class="text-xs">🚴</span></div>
+                    <div class="text-xs font-bold text-orange-400 mb-1">🔥 高碳日</div>
+                    <div class="text-xs text-slate-300 mb-2">补剂B组</div>
+                    <div class="text-xs bg-slate-700/50 p-1 rounded text-center text-slate-400 mb-1">18:00 GABA</div>
+                    <div class="text-xs font-bold bg-orange-500 text-white p-1 rounded text-center">19:50 RPM骑行</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-emerald-500">
+                    <div class="text-xs font-bold text-emerald-400 mb-1">🍃 低碳日</div>
+                    <div class="text-xs text-slate-300">补剂A组</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-emerald-500">
+                    <div class="text-xs font-bold text-emerald-400 mb-1">🍃 低碳日</div>
+                    <div class="text-xs text-slate-300">补剂A组</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-emerald-500 opacity-70">
+                    <div class="text-xs font-bold text-emerald-400 mb-1">🍃 低碳日</div>
+                    <div class="text-xs text-slate-500">休息/重置</div>
+                </div>
+            </div>
+
+            <!-- Swimlane: Airbnb -->
+            <div class="grid grid-cols-8 gap-4 mb-4">
+                <div class="col-span-1 flex items-center justify-center glass-panel rounded-lg bg-slate-800/50">
+                    <span class="swimlane-title font-bold tracking-widest text-slate-400">防御线 / Airbnb</span>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-slate-600 bg-slate-800/30">
+                    <div class="text-xs font-bold text-slate-400 mb-2">已压缩单兵作战</div>
+                    <div class="text-xs text-slate-300 line-through decoration-slate-500">1:30 Figma连线</div>
+                    <div class="text-xs text-emerald-400 font-bold mt-1">✓ 2:00 异步甩锅</div>
+                    <div class="text-xs text-slate-300 mt-1">✓ 3:00 极简PPT</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-slate-600 bg-slate-800/30">
+                    <div class="text-xs font-bold text-slate-400 mb-2">Design Weekly</div>
+                    <div class="text-xs text-slate-300">观察Ryan决策。</div>
+                    <div class="text-xs text-slate-400 italic mt-2">"绝不越俎代庖"</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-slate-600 bg-slate-800/30 relative">
+                    <div class="absolute -top-2 -right-2 text-[10px] bg-red-900/80 text-red-300 px-1 rounded border border-red-500/30">Tax Day</div>
+                    <div class="text-xs font-bold text-slate-400 mb-2">表面同步 (Eric)</div>
+                    <div class="text-xs text-slate-300">争取异步。如Live，15分钟内结束，抛出数据诉求。</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-slate-600 bg-slate-800/30">
+                    <div class="text-xs font-bold text-slate-400 mb-2">项目挂起 / 封板</div>
+                    <div class="text-xs text-slate-300">Link Unfurling 最后检查。无数据则按默认设置备注，直接挂起。</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-red-500 bg-red-900/10">
+                    <div class="text-xs font-bold text-red-400 mb-2">🚨 物理切断</div>
+                    <div class="text-xs text-white">设置 OOO 自动回复。</div>
+                    <div class="text-[10px] bg-red-500 text-white px-1 py-0.5 rounded mt-1 inline-block">进入休假倒计时</div>
+                </div>
+                <div class="col-span-2 glass-panel rounded-lg p-3 bg-slate-900/50 flex items-center justify-center">
+                    <span class="text-slate-600 font-mono text-sm">--- FIREWALL ACTIVE ---</span>
+                </div>
+            </div>
+
+            <!-- Swimlane: AI Social -->
+            <div class="grid grid-cols-8 gap-4 mb-4">
+                <div class="col-span-1 flex items-center justify-center glass-panel rounded-lg bg-slate-800/50">
+                    <span class="swimlane-title font-bold tracking-widest text-purple-400">资产线 / AI社交</span>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 opacity-50"></div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-purple-500 bg-purple-900/20 shadow-[0_0_15px_rgba(168,85,247,0.15)]">
+                    <div class="text-xs bg-purple-500 text-white font-bold px-1 py-0.5 rounded mb-2 inline-block">10:00 - 11:30</div>
+                    <div class="text-xs font-bold text-purple-300 mb-1">🧠 绝对心流区</div>
+                    <div class="text-xs text-slate-300">构建匹配逻辑模型</div>
+                    <div class="text-xs text-slate-400 mt-1">输出: 粗粒度原骨架</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-purple-500 bg-purple-900/20">
+                    <div class="text-xs font-bold text-purple-300 mb-1">抛出诱饵 (下班前)</div>
+                    <div class="text-xs text-slate-300">将PRD草稿发给合伙人，设定周末会议边界，消除黑盒焦虑。</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 opacity-50"></div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 opacity-50"></div>
+                <div class="col-span-2 glass-panel rounded-lg p-3 border-l-4 border-purple-500 bg-purple-900/20 flex flex-col justify-center">
+                    <div class="text-xs font-bold text-purple-300 mb-1">合伙人 Weekly</div>
+                    <div class="text-xs text-slate-300">基于草稿决策，锁定 Demo 期开发路径与优先级。</div>
+                </div>
+            </div>
+
+            <!-- Swimlane: Vibe Coding -->
+            <div class="grid grid-cols-8 gap-4 mb-4">
+                <div class="col-span-1 flex items-center justify-center glass-panel rounded-lg bg-slate-800/50">
+                    <span class="swimlane-title font-bold tracking-widest text-cyan-400">灵魂线 / Vibe Coding</span>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-cyan-800 opacity-60">
+                    <div class="text-xs font-bold text-cyan-600 mb-1">深夜静谧</div>
+                    <div class="text-xs text-slate-400">休整，基础代码维护</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-cyan-400 bg-cyan-900/20 shadow-[0_0_15px_rgba(34,211,238,0.2)]">
+                    <div class="text-xs bg-cyan-900/50 text-cyan-300 font-bold px-1 py-0.5 rounded mb-1 inline-block border border-cyan-500/30">🌙 夜间心流冲刺</div>
+                    <div class="text-xs font-bold text-white mb-1">AI同传工具 (Mac)</div>
+                    <div class="text-[10px] text-slate-300 leading-tight">利用白天 Design Weekly 录音，调优多 Speaker 识别阈值。</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-cyan-400 bg-cyan-900/20 shadow-[0_0_15px_rgba(34,211,238,0.2)]">
+                    <div class="text-xs bg-cyan-900/50 text-cyan-300 font-bold px-1 py-0.5 rounded mb-1 inline-block border border-cyan-500/30">🌙 夜间心流冲刺</div>
+                    <div class="text-xs font-bold text-white mb-1">性能与质量压测</div>
+                    <div class="text-[10px] text-slate-300 leading-tight">测试模型大小平衡，冲击内存占用率 &lt; 50% 目标。</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-cyan-400 bg-cyan-900/20 shadow-[0_0_15px_rgba(34,211,238,0.2)]">
+                    <div class="text-xs bg-cyan-900/50 text-cyan-300 font-bold px-1 py-0.5 rounded mb-1 inline-block border border-cyan-500/30">🌙 夜间心流冲刺</div>
+                    <div class="text-xs font-bold text-white mb-1">收尾与本地打包</div>
+                    <div class="text-[10px] text-slate-300 leading-tight">锁定本周最佳模型参数版本。</div>
+                </div>
+                <div class="col-span-1 glass-panel rounded-lg p-3 border-l-4 border-cyan-800 opacity-60">
+                    <div class="text-xs font-bold text-cyan-600 mb-1">放空 / 碎片整理</div>
+                </div>
+                <div class="col-span-2 glass-panel rounded-lg p-3 bg-slate-900/50 flex flex-col items-center justify-center opacity-70 border border-dashed border-slate-600">
+                    <div class="text-xs text-slate-400">准备江浙沪闭关，享受自然与代码的纯粹。</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== MOBILE LAYOUT (<md) ==================== -->
+    <div class="md:hidden flex-grow space-y-6">
+
+        <!-- Day Headers (horizontal scroll) -->
+        <div class="flex gap-2 overflow-x-auto mobile-scroll pb-2">
+            <div class="flex-shrink-0 glass-panel rounded-lg px-3 py-2 border-t-2 border-slate-500 text-slate-300 text-center min-w-[80px]">
+                <div class="font-bold text-sm">周一</div>
+                <div class="text-[10px] text-slate-500">4.13 今日</div>
+            </div>
+            <div class="flex-shrink-0 glass-panel rounded-lg px-3 py-2 border-t-2 border-orange-500 text-orange-400 font-bold bg-orange-950/20 text-center min-w-[80px]">
+                <div class="text-sm">周二</div>
+                <div class="text-[10px] text-orange-500/70">4.14 高能</div>
+            </div>
+            <div class="flex-shrink-0 glass-panel rounded-lg px-3 py-2 border-t-2 border-orange-500 text-orange-400 font-bold bg-orange-950/20 text-center min-w-[80px]">
+                <div class="text-sm">周三</div>
+                <div class="text-[10px] text-orange-500/70">4.15 高能</div>
+            </div>
+            <div class="flex-shrink-0 glass-panel rounded-lg px-3 py-2 border-t-2 border-orange-500 text-orange-400 font-bold bg-orange-950/20 text-center min-w-[80px]">
+                <div class="text-sm">周四</div>
+                <div class="text-[10px] text-orange-500/70">4.16 高能</div>
+            </div>
+            <div class="flex-shrink-0 glass-panel rounded-lg px-3 py-2 border-t-2 border-slate-500 text-slate-300 text-center min-w-[80px]">
+                <div class="font-bold text-sm">周五</div>
+                <div class="text-[10px] text-slate-500">4.17</div>
+            </div>
+            <div class="flex-shrink-0 glass-panel rounded-lg px-3 py-2 border-t-2 border-slate-500 text-slate-300 text-center min-w-[80px]">
+                <div class="font-bold text-sm">周六</div>
+                <div class="text-[10px] text-slate-500">4.18</div>
+            </div>
+            <div class="flex-shrink-0 glass-panel rounded-lg px-3 py-2 border-t-2 border-slate-500 text-slate-300 text-center min-w-[80px]">
+                <div class="font-bold text-sm">周日</div>
+                <div class="text-[10px] text-slate-500">4.19</div>
+            </div>
+        </div>
+
+        <!-- Swimlane: Health & Energy -->
+        <section>
+            <div class="flex items-center gap-2 mb-3">
+                <div class="w-1 h-6 bg-emerald-400 rounded-full"></div>
+                <h2 class="text-sm font-bold text-emerald-400 tracking-wide">生命线 / 能量</h2>
+            </div>
+            <div class="flex gap-3 overflow-x-auto mobile-scroll pb-2">
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-emerald-500">
+                    <div class="text-[10px] text-slate-500 mb-1">周一 4.13</div>
+                    <div class="text-xs font-bold text-emerald-400 mb-1">🍃 低碳日</div>
+                    <div class="text-xs text-slate-300 mb-2">补剂A组</div>
+                    <div class="text-xs bg-slate-700/50 p-1 rounded text-center text-slate-400">18:00 GABA</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-orange-500 bg-orange-900/10 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-8 h-8 bg-orange-500/20 rounded-bl-full flex justify-center items-center"><span class="text-xs">🥊</span></div>
+                    <div class="text-[10px] text-orange-500/70 mb-1">周二 4.14 · 高能日</div>
+                    <div class="text-xs font-bold text-orange-400 mb-1">🔥 高碳日</div>
+                    <div class="text-xs text-slate-300 mb-2">补剂A组</div>
+                    <div class="text-xs bg-slate-700/50 p-1 rounded text-center text-slate-400 mb-1">18:00 GABA</div>
+                    <div class="text-xs font-bold bg-orange-500 text-white p-1 rounded text-center">19:50 BODYCOMBAT</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-orange-500 bg-orange-900/10 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-8 h-8 bg-orange-500/20 rounded-bl-full flex justify-center items-center"><span class="text-xs">🥊</span></div>
+                    <div class="text-[10px] text-orange-500/70 mb-1">周三 4.15 · 高能日</div>
+                    <div class="text-xs font-bold text-orange-400 mb-1">🔥 高碳日</div>
+                    <div class="text-xs text-slate-300 mb-2">补剂B组</div>
+                    <div class="text-xs bg-slate-700/50 p-1 rounded text-center text-slate-400 mb-1">18:00 GABA</div>
+                    <div class="text-xs font-bold bg-orange-500 text-white p-1 rounded text-center">19:50 BODYCOMBAT</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-orange-500 bg-orange-900/10 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-8 h-8 bg-orange-500/20 rounded-bl-full flex justify-center items-center"><span class="text-xs">🚴</span></div>
+                    <div class="text-[10px] text-orange-500/70 mb-1">周四 4.16 · 高能日</div>
+                    <div class="text-xs font-bold text-orange-400 mb-1">🔥 高碳日</div>
+                    <div class="text-xs text-slate-300 mb-2">补剂B组</div>
+                    <div class="text-xs bg-slate-700/50 p-1 rounded text-center text-slate-400 mb-1">18:00 GABA</div>
+                    <div class="text-xs font-bold bg-orange-500 text-white p-1 rounded text-center">19:50 RPM骑行</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-emerald-500">
+                    <div class="text-[10px] text-slate-500 mb-1">周五 4.17</div>
+                    <div class="text-xs font-bold text-emerald-400 mb-1">🍃 低碳日</div>
+                    <div class="text-xs text-slate-300">补剂A组</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-emerald-500">
+                    <div class="text-[10px] text-slate-500 mb-1">周六 4.18</div>
+                    <div class="text-xs font-bold text-emerald-400 mb-1">🍃 低碳日</div>
+                    <div class="text-xs text-slate-300">补剂A组</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-emerald-500 opacity-70">
+                    <div class="text-[10px] text-slate-500 mb-1">周日 4.19</div>
+                    <div class="text-xs font-bold text-emerald-400 mb-1">🍃 低碳日</div>
+                    <div class="text-xs text-slate-500">休息/重置</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Swimlane: Airbnb -->
+        <section>
+            <div class="flex items-center gap-2 mb-3">
+                <div class="w-1 h-6 bg-slate-400 rounded-full"></div>
+                <h2 class="text-sm font-bold text-slate-400 tracking-wide">防御线 / Airbnb</h2>
+            </div>
+            <div class="flex gap-3 overflow-x-auto mobile-scroll pb-2">
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-slate-600 bg-slate-800/30">
+                    <div class="text-[10px] text-slate-500 mb-1">周一 4.13</div>
+                    <div class="text-xs font-bold text-slate-400 mb-2">已压缩单兵作战</div>
+                    <div class="text-xs text-slate-300 line-through decoration-slate-500">1:30 Figma连线</div>
+                    <div class="text-xs text-emerald-400 font-bold mt-1">✓ 2:00 异步甩锅</div>
+                    <div class="text-xs text-slate-300 mt-1">✓ 3:00 极简PPT</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-slate-600 bg-slate-800/30">
+                    <div class="text-[10px] text-orange-500/70 mb-1">周二 4.14 · 高能日</div>
+                    <div class="text-xs font-bold text-slate-400 mb-2">Design Weekly</div>
+                    <div class="text-xs text-slate-300">观察Ryan决策。</div>
+                    <div class="text-xs text-slate-400 italic mt-2">"绝不越俎代庖"</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-slate-600 bg-slate-800/30 relative">
+                    <div class="absolute -top-2 -right-2 text-[10px] bg-red-900/80 text-red-300 px-1 rounded border border-red-500/30">Tax Day</div>
+                    <div class="text-[10px] text-orange-500/70 mb-1">周三 4.15 · 高能日</div>
+                    <div class="text-xs font-bold text-slate-400 mb-2">表面同步 (Eric)</div>
+                    <div class="text-xs text-slate-300">争取异步。如Live，15分钟内结束，抛出数据诉求。</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-slate-600 bg-slate-800/30">
+                    <div class="text-[10px] text-orange-500/70 mb-1">周四 4.16 · 高能日</div>
+                    <div class="text-xs font-bold text-slate-400 mb-2">项目挂起 / 封板</div>
+                    <div class="text-xs text-slate-300">Link Unfurling 最后检查。无数据则按默认设置备注，直接挂起。</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-red-500 bg-red-900/10">
+                    <div class="text-[10px] text-slate-500 mb-1">周五 4.17</div>
+                    <div class="text-xs font-bold text-red-400 mb-2">🚨 物理切断</div>
+                    <div class="text-xs text-white">设置 OOO 自动回复。</div>
+                    <div class="text-[10px] bg-red-500 text-white px-1 py-0.5 rounded mt-1 inline-block">进入休假倒计时</div>
+                </div>
+                <div class="flex-shrink-0 w-[280px] glass-panel rounded-lg p-3 bg-slate-900/50 flex items-center justify-center">
+                    <div class="text-[10px] text-slate-500 mr-2">周末</div>
+                    <span class="text-slate-600 font-mono text-xs">--- FIREWALL ACTIVE ---</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Swimlane: AI Social -->
+        <section>
+            <div class="flex items-center gap-2 mb-3">
+                <div class="w-1 h-6 bg-purple-400 rounded-full"></div>
+                <h2 class="text-sm font-bold text-purple-400 tracking-wide">资产线 / AI社交</h2>
+            </div>
+            <div class="flex gap-3 overflow-x-auto mobile-scroll pb-2">
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-purple-500 bg-purple-900/20 shadow-[0_0_15px_rgba(168,85,247,0.15)]">
+                    <div class="text-[10px] text-orange-500/70 mb-1">周二 4.14 · 高能日</div>
+                    <div class="text-xs bg-purple-500 text-white font-bold px-1 py-0.5 rounded mb-2 inline-block">10:00 - 11:30</div>
+                    <div class="text-xs font-bold text-purple-300 mb-1">🧠 绝对心流区</div>
+                    <div class="text-xs text-slate-300">构建匹配逻辑模型</div>
+                    <div class="text-xs text-slate-400 mt-1">输出: 粗粒度原骨架</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-purple-500 bg-purple-900/20">
+                    <div class="text-[10px] text-orange-500/70 mb-1">周三 4.15 · 高能日</div>
+                    <div class="text-xs font-bold text-purple-300 mb-1">抛出诱饵 (下班前)</div>
+                    <div class="text-xs text-slate-300">将PRD草稿发给合伙人，设定周末会议边界，消除黑盒焦虑。</div>
+                </div>
+                <div class="flex-shrink-0 w-[280px] glass-panel rounded-lg p-3 border-l-4 border-purple-500 bg-purple-900/20">
+                    <div class="text-[10px] text-slate-500 mb-1">周末 4.18-19</div>
+                    <div class="text-xs font-bold text-purple-300 mb-1">合伙人 Weekly</div>
+                    <div class="text-xs text-slate-300">基于草稿决策，锁定 Demo 期开发路径与优先级。</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Swimlane: Vibe Coding -->
+        <section>
+            <div class="flex items-center gap-2 mb-3">
+                <div class="w-1 h-6 bg-cyan-400 rounded-full"></div>
+                <h2 class="text-sm font-bold text-cyan-400 tracking-wide">灵魂线 / Vibe Coding</h2>
+            </div>
+            <div class="flex gap-3 overflow-x-auto mobile-scroll pb-2">
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-cyan-800 opacity-60">
+                    <div class="text-[10px] text-slate-500 mb-1">周一 4.13</div>
+                    <div class="text-xs font-bold text-cyan-600 mb-1">深夜静谧</div>
+                    <div class="text-xs text-slate-400">休整，基础代码维护</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-cyan-400 bg-cyan-900/20 shadow-[0_0_15px_rgba(34,211,238,0.2)]">
+                    <div class="text-[10px] text-orange-500/70 mb-1">周二 4.14 · 高能日</div>
+                    <div class="text-xs bg-cyan-900/50 text-cyan-300 font-bold px-1 py-0.5 rounded mb-1 inline-block border border-cyan-500/30">🌙 夜间心流冲刺</div>
+                    <div class="text-xs font-bold text-white mb-1">AI同传工具 (Mac)</div>
+                    <div class="text-[10px] text-slate-300 leading-tight">利用白天 Design Weekly 录音，调优多 Speaker 识别阈值。</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-cyan-400 bg-cyan-900/20 shadow-[0_0_15px_rgba(34,211,238,0.2)]">
+                    <div class="text-[10px] text-orange-500/70 mb-1">周三 4.15 · 高能日</div>
+                    <div class="text-xs bg-cyan-900/50 text-cyan-300 font-bold px-1 py-0.5 rounded mb-1 inline-block border border-cyan-500/30">🌙 夜间心流冲刺</div>
+                    <div class="text-xs font-bold text-white mb-1">性能与质量压测</div>
+                    <div class="text-[10px] text-slate-300 leading-tight">测试模型大小平衡，冲击内存占用率 &lt; 50% 目标。</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-cyan-400 bg-cyan-900/20 shadow-[0_0_15px_rgba(34,211,238,0.2)]">
+                    <div class="text-[10px] text-orange-500/70 mb-1">周四 4.16 · 高能日</div>
+                    <div class="text-xs bg-cyan-900/50 text-cyan-300 font-bold px-1 py-0.5 rounded mb-1 inline-block border border-cyan-500/30">🌙 夜间心流冲刺</div>
+                    <div class="text-xs font-bold text-white mb-1">收尾与本地打包</div>
+                    <div class="text-[10px] text-slate-300 leading-tight">锁定本周最佳模型参数版本。</div>
+                </div>
+                <div class="flex-shrink-0 w-[200px] glass-panel rounded-lg p-3 border-l-4 border-cyan-800 opacity-60">
+                    <div class="text-[10px] text-slate-500 mb-1">周五 4.17</div>
+                    <div class="text-xs font-bold text-cyan-600 mb-1">放空 / 碎片整理</div>
+                </div>
+                <div class="flex-shrink-0 w-[280px] glass-panel rounded-lg p-3 bg-slate-900/50 flex flex-col items-center justify-center opacity-70 border border-dashed border-slate-600">
+                    <div class="text-[10px] text-slate-500 mb-1">周末 4.18-19</div>
+                    <div class="text-xs text-slate-400">准备江浙沪闭关，享受自然与代码的纯粹。</div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Footer Quote -->
+    <footer class="mt-6 md:mt-8 border-t border-slate-700 pt-4 md:pt-6 text-center">
+        <p class="text-slate-300 text-sm md:text-lg font-serif italic mb-2">"如果一件事不是 '绝对要做 (Hell Yes)'，那就是 '绝对不做 (No)'。"</p>
+        <p class="text-slate-500 text-xs md:text-sm">您的时间是用来改变命运的，不要在别人的泥潭里耗尽能量。</p>
+    </footer>
+
+</body>
+</html>
