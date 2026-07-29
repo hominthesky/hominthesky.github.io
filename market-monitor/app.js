@@ -61,14 +61,18 @@ async function decryptPayload(password) {
 
 function pct(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
-  return `${(Number(value) * 100).toFixed(digits)}%`;
+  const safeDigits =
+    Number.isInteger(digits) && digits >= 0 && digits <= 20 ? digits : 1;
+  return `${(Number(value) * 100).toFixed(safeDigits)}%`;
 }
 
 function number(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+  const safeDigits =
+    Number.isInteger(digits) && digits >= 0 && digits <= 20 ? digits : 1;
   return Number(value).toLocaleString("zh-CN", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
+    minimumFractionDigits: safeDigits,
+    maximumFractionDigits: safeDigits,
   });
 }
 
@@ -78,7 +82,7 @@ function usd(value, compact = false) {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: 0,
-    notation: compact ? "compact" : "standard",
+    notation: compact === true ? "compact" : "standard",
   }).format(Number(value));
 }
 
