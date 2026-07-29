@@ -147,7 +147,7 @@ function table(columns, rows) {
     const tr = el("tr");
     columns.forEach((column) => {
       const td = el("td", column.numeric ? "num" : "");
-      const value = column.render ? column.render(row[column.key], row) : row[column.key];
+      const value = column.render ? column.render(row[column.key]) : row[column.key];
       if (value instanceof Node) td.appendChild(value);
       else td.textContent = value ?? "—";
       tr.appendChild(td);
