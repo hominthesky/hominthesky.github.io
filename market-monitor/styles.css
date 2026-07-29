@@ -403,9 +403,8 @@ input:focus {
 
 .position-list {
   display: grid;
-  gap: 1px;
-  border-top: 1px solid var(--line);
-  background: var(--line);
+  gap: 10px;
+  padding: 0 16px 18px;
 }
 
 .position-row {
@@ -414,6 +413,8 @@ input:focus {
   align-items: start;
   gap: 18px;
   padding: 17px 20px;
+  border: 1px solid rgba(163, 184, 214, 0.17);
+  border-radius: 14px;
   background: rgba(9, 23, 39, 0.94);
 }
 
@@ -426,6 +427,7 @@ input:focus {
 .position-identity strong,
 .position-exposure strong {
   font-size: 15px;
+  letter-spacing: -0.01em;
 }
 
 .position-identity span,
@@ -447,6 +449,11 @@ input:focus {
   color: #d8e1ee;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.position-row:hover {
+  border-color: rgba(163, 184, 214, 0.3);
+  background: rgba(13, 31, 51, 0.98);
 }
 
 .position-state {
