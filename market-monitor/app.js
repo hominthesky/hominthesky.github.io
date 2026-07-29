@@ -568,6 +568,9 @@ byId("unlock-form").addEventListener("submit", async (event) => {
     renderDashboard();
     byId("unlock-view").hidden = true;
     byId("dashboard").hidden = false;
+    requestAnimationFrame(() => {
+      byId("dashboard").scrollIntoView({ block: "start" });
+    });
   } catch (decryptError) {
     error.textContent =
       decryptError instanceof DOMException
