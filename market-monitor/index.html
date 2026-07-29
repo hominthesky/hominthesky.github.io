@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    />
+    <title>市场杠杆与持仓风险监控</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <main id="unlock-view" class="unlock-view">
+      <section class="unlock-card" aria-labelledby="unlock-title">
+        <div class="brand-mark" aria-hidden="true">Z</div>
+        <p class="eyebrow">ZZAO · PRIVATE MONITOR</p>
+        <h1 id="unlock-title">市场杠杆与持仓风险监控</h1>
+        <p class="unlock-copy">
+          数据以美东时间统计，单日窗口为 T-1 夜盘至 T 日盘后结束。
+        </p>
+        <form id="unlock-form" autocomplete="off">
+          <label for="password">访问密码</label>
+          <div class="password-row">
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              inputmode="text"
+              required
+              autofocus
+            />
+            <button id="unlock-button" type="submit">解锁监控</button>
+          </div>
+          <p id="unlock-error" class="form-error" role="alert" aria-live="polite"></p>
+        </form>
+        <p class="security-note">
+          密码只用于在本机浏览器解密，不会发送到服务器，也不会被保存。
+        </p>
+      </section>
+    </main>
+
+    <main id="dashboard" class="dashboard" hidden>
+      <header class="dashboard-header">
+        <div>
+          <p class="eyebrow">ZZAO · MARKET LEVERAGE MONITOR</p>
+          <h1>市场杠杆与持仓风险监控</h1>
+          <div id="asof-line" class="asof-line"></div>
+        </div>
+        <div class="header-actions">
+          <span id="snapshot-status" class="status-pill"></span>
+          <button id="lock-button" class="ghost-button" type="button">锁定</button>
+        </div>
+      </header>
+
+      <nav class="tabs" aria-label="监控视图">
+        <button
+          id="tab-personal"
+          class="tab-button"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="panel-personal"
+          data-tab="personal"
+        >
+          我的持仓
+          <span id="personal-tab-alert" class="tab-count"></span>
+        </button>
+        <button
+          id="tab-macro"
+          class="tab-button"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-macro"
+          data-tab="macro"
+        >
+          宏观与板块
+          <span id="macro-tab-alert" class="tab-count"></span>
+        </button>
+      </nav>
+
+      <section
+        id="panel-personal"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-personal"
+      >
+        <div id="personal-content"></div>
+      </section>
+      <section
+        id="panel-macro"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-macro"
+        hidden
+      >
+        <div id="macro-content"></div>
+      </section>
+
+      <footer>
+        <p>
+          本页面是风险管理辅助工具，不自动下单。事实、推断和行动条件应分别复核；缺失数据不按零处理。
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>
