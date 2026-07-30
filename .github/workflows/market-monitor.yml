@@ -36,6 +36,8 @@ jobs:
           repository: hominthesky/Personal-finance
           ref: main
           path: .monitor-source
+          ssh-key: ${{ secrets.SOURCE_REPO_DEPLOY_KEY }}
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
