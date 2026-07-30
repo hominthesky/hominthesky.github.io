@@ -720,8 +720,7 @@ tbody tr:last-child td {
   font-size: 10px;
 }
 
-.chart-line-semi,
-.chart-line-nasdaq {
+.chart-line {
   fill: none;
   stroke-width: 2.5;
   vector-effect: non-scaling-stroke;
@@ -731,12 +730,21 @@ tbody tr:last-child td {
   stroke: var(--red);
 }
 
-.chart-line-nasdaq {
+.chart-line-memory_storage {
+  stroke: #a98bff;
+}
+
+.chart-line-chip_core {
+  stroke: var(--amber);
+}
+
+.chart-line-nasdaq_core {
   stroke: var(--cyan);
 }
 
 .chart-legend {
   display: flex;
+  flex-wrap: wrap;
   gap: 18px;
   margin: 0 0 8px 4px;
   color: var(--muted);
@@ -755,7 +763,15 @@ tbody tr:last-child td {
   background: var(--red);
 }
 
-.legend-dot.nasdaq {
+.legend-dot.memory_storage {
+  background: #a98bff;
+}
+
+.legend-dot.chip_core {
+  background: var(--amber);
+}
+
+.legend-dot.nasdaq_core {
   background: var(--cyan);
 }
 

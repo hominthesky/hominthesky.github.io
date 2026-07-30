@@ -357,11 +357,23 @@ function universeCard(universe, action) {
 function renderPressureChart(rows) {
   const wrap = el("div", "chart-wrap");
   const legend = el("div", "chart-legend");
-  const semiLegend = el("span");
-  append(semiLegend, el("i", "legend-dot semi"), document.createTextNode("半导体"));
-  const nasdaqLegend = el("span");
-  append(nasdaqLegend, el("i", "legend-dot nasdaq"), document.createTextNode("纳斯达克核心"));
-  append(legend, semiLegend, nasdaqLegend);
+  const universeLabels = Object.fromEntries(
+    monitorData.macro.universes.map((row) => [
+      row.universe_id,
+      row.universe_label,
+    ]),
+  );
+  const series = monitorData.macro.universes.map((row) => row.universe_id);
+  series.forEach((id) => {
+    const className = id.replace(/[^a-z0-9_-]/gi, "-");
+    const item = el("span");
+    append(
+      item,
+      el("i", `legend-dot ${className}`),
+      document.createTextNode(universeLabels[id] || id),
+    );
+    legend.appendChild(item);
+  });
 
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "pressure-chart");
@@ -388,7 +400,6 @@ function renderPressureChart(rows) {
     label.textContent = String(tick);
     svg.appendChild(label);
   });
-  const series = ["semi", "nasdaq_core"];
   series.forEach((id) => {
     const values = rows.filter((row) => row.universe_id === id);
     if (!values.length) return;
@@ -403,10 +414,8 @@ function renderPressureChart(rows) {
       })
       .join(" ");
     const polyline = document.createElementNS(svg.namespaceURI, "polyline");
-    polyline.setAttribute(
-      "class",
-      id === "semi" ? "chart-line-semi" : "chart-line-nasdaq",
-    );
+    const className = id.replace(/[^a-z0-9_-]/gi, "-");
+    polyline.setAttribute("class", `chart-line chart-line-${className}`);
     polyline.setAttribute("points", points);
     svg.appendChild(polyline);
   });
@@ -431,23 +440,23 @@ function renderMacro() {
 
   const metrics = el("section", "metric-grid");
   const hero = data.hero;
-  append(
-    metrics,
+  metrics.appendChild(
     metricCard(
       "FINRA 融资余额同比",
       pct(hero.margin_debt_yoy),
       `参考月 ${hero.margin_reference_month || "—"} · 全市场慢频存量`,
     ),
-    metricCard(
-      "半导体压力",
-      number(hero.semi_pressure, 1),
-      hero.semi_state,
-    ),
-    metricCard(
-      "纳斯达克核心压力",
-      number(hero.nasdaq_pressure, 1),
-      hero.nasdaq_state,
-    ),
+  );
+  data.universes.forEach((universe) => {
+    metrics.appendChild(
+      metricCard(
+        `${universe.universe_label}压力`,
+        number(universe.price_deleveraging_pressure, 1),
+        `${universe.state_code || "S0"} ${universe.state_label || "观察"}`,
+      ),
+    );
+  });
+  metrics.appendChild(
     metricCard(
       "完整时段行情覆盖",
       pct(hero.full_session_market_data_coverage),
