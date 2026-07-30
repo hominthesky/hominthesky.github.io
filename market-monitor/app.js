@@ -5,6 +5,43 @@ let monitorData = null;
 
 const byId = (id) => document.getElementById(id);
 
+const TERM_DEFINITIONS = {
+  grossLeverage:
+    "组合所有多空名义敞口绝对值之和 ÷ 组合净资产（NAV）。上升会放大回撤、融资成本和保证金风险；下降会改善安全垫。",
+  deleverAmount:
+    "按当前净资产静态估算，把组合毛杠杆降到治理红线所需减少的毛敞口。它不是建议订单金额，执行前必须用券商实时数据重算。",
+  attackExposure:
+    "高进攻策略的名义毛敞口 ÷ 组合净资产。因为包含融资和名义敞口，该比例可以超过100%。",
+  highestAccountLeverage:
+    "各券商账户的毛敞口 ÷ 该账户净资产中的最高值。数值越高，该账户通常越容易先受到保证金约束。",
+  finraMarginYoy:
+    "FINRA 全市场客户融资余额相对上年同期的变化。上升表示融资存量扩张，下降可能是健康降温，也可能是被动去杠杆；该数据按月发布且不能定位具体板块。",
+  pricePressure:
+    "0–100的历史分位代理，综合短期跌幅、波动、回撤、市场宽度和相关性。上升表示价格型去杠杆压力增强，下降只表示急性压力缓和；它不是实际杠杆率或爆仓概率。",
+  fullSessionCoverage:
+    "当前价格源对美东时间 [T-1 20:00, T 20:00) 完整监控日的覆盖比例。上升表示夜盘、盘前、正常盘和盘后数据更完整，不代表市场风险上升。",
+  return5d:
+    "当前价格相对5个交易日前的涨跌幅。下跌越大，短期价格冲击越强；单独上涨不能证明风险已经清除。",
+  drawdown20d:
+    "当前价格相对过去20个交易日最高价的跌幅。数值越负，近期价格损伤越深。",
+  breadth50:
+    "板块成分股中价格高于各自50日均线的比例。上升表示上涨或修复扩散，下降表示更多股票跌破中期趋势。",
+  volatility20:
+    "最近20个交易日日收益率的年化实现波动率。上升表示价格振幅和风险预算消耗加快。",
+  correlation20:
+    "板块成分股最近20日收益率的平均相关性。快速上升表示个股更容易一起涨跌，常见于系统性卖压，但不能单独证明强平。",
+  priceCoverage:
+    "该板块配置成分中成功取得可用价格历史的比例。覆盖越低，板块分数和状态的置信度越低。",
+  crowdingProxy:
+    "价格型拥挤代理：60日动量分位40%＋价格在252日区间的位置35%＋异常成交量分位25%。上升表示趋势交易更集中，但不是实际机构持仓。",
+  priceDamage:
+    "价格损伤分数：5日跌幅分位40%＋20日波动率分位30%＋20日回撤分位30%。上升表示卖压、波动和回撤综合恶化。",
+  tickerRisk:
+    "个股风险优先分对应的等级：拥挤代理45%＋价格损伤55%。用于排查优先级，不是自动买卖信号。",
+  sourceCoverage:
+    "本次运行中该公开数据源成功取得有效观察值的比例。下降表示证据缺口变大，不代表市场风险改善。",
+};
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -17,6 +54,73 @@ function append(parent, ...children) {
     if (child !== null && child !== undefined) parent.appendChild(child);
   }
   return parent;
+}
+
+let activeTermAnchor = null;
+
+function hideTermTooltip() {
+  const tooltip = byId("term-tooltip-live");
+  if (tooltip) tooltip.hidden = true;
+  if (activeTermAnchor) activeTermAnchor.removeAttribute("aria-describedby");
+  activeTermAnchor = null;
+}
+
+function termTooltipNode() {
+  let tooltip = byId("term-tooltip-live");
+  if (tooltip) return tooltip;
+  tooltip = el("div", "term-tooltip-panel");
+  tooltip.id = "term-tooltip-live";
+  tooltip.setAttribute("role", "tooltip");
+  tooltip.hidden = true;
+  document.body.appendChild(tooltip);
+  window.addEventListener("resize", hideTermTooltip);
+  window.addEventListener("scroll", hideTermTooltip, true);
+  return tooltip;
+}
+
+function showTermTooltip(anchor) {
+  const definition = anchor.dataset.tooltip;
+  if (!definition) return;
+  const tooltip = termTooltipNode();
+  activeTermAnchor = anchor;
+  tooltip.textContent = definition;
+  tooltip.hidden = false;
+  tooltip.style.left = "0px";
+  tooltip.style.top = "0px";
+  const anchorRect = anchor.getBoundingClientRect();
+  const tooltipRect = tooltip.getBoundingClientRect();
+  const margin = 12;
+  const gap = 9;
+  const left = Math.min(
+    window.innerWidth - tooltipRect.width - margin,
+    Math.max(margin, anchorRect.left),
+  );
+  const below = anchorRect.bottom + gap;
+  const top =
+    below + tooltipRect.height <= window.innerHeight - margin
+      ? below
+      : Math.max(margin, anchorRect.top - tooltipRect.height - gap);
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+  anchor.setAttribute("aria-describedby", tooltip.id);
+}
+
+function term(label, definition, className = "") {
+  const node = el("span", `term-tooltip ${className}`.trim(), label);
+  node.dataset.tooltip = definition;
+  node.tabIndex = 0;
+  node.setAttribute("aria-label", `${label}：${definition}`);
+  node.addEventListener("mouseenter", () => showTermTooltip(node));
+  node.addEventListener("mouseleave", hideTermTooltip);
+  node.addEventListener("focus", () => showTermTooltip(node));
+  node.addEventListener("blur", hideTermTooltip);
+  node.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      hideTermTooltip();
+      node.blur();
+    }
+  });
+  return node;
 }
 
 function b64bytes(value) {
@@ -118,14 +222,151 @@ function actionTone(label) {
   return "tone-neutral";
 }
 
-function metricCard(label, value, note) {
-  const card = el("article", "metric-card");
+function portfolioMetricGuidance(summary) {
+  const leverage = Number(summary.gross_leverage);
+  const leverageRed = Number(summary.gross_leverage_red);
+  const attackExposure = Number(summary.attack_exposure_pct_nav);
+  const attackTarget = Number(summary.attack_target_pct_nav);
+  return {
+    leverage: {
+      definition: TERM_DEFINITIONS.grossLeverage,
+      meaning: "↑ 回撤与保证金敏感度增加；↓ 强平安全垫改善。",
+      action:
+        Number.isFinite(leverage) &&
+        Number.isFinite(leverageRed) &&
+        leverage > leverageRed
+          ? `高于 ${number(leverageRed, 2)}x 红线：停止新增杠杆，先降到红线以下。`
+          : "未越过红线：仍需按券商实时保证金维持安全垫。",
+      tone:
+        Number.isFinite(leverage) &&
+        Number.isFinite(leverageRed) &&
+        leverage > leverageRed
+          ? "tone-red"
+          : "tone-neutral",
+    },
+    reduction: {
+      definition: TERM_DEFINITIONS.deleverAmount,
+      meaning: "↑ 离治理红线更远；↓ 更接近风险预算范围。",
+      action: "先用券商实时 NAV、融资负债和 house requirement 重算，再决定账户与手数。",
+      tone: "tone-red",
+    },
+    attack: {
+      definition: TERM_DEFINITIONS.attackExposure,
+      meaning: "↑ 高波动与集中度风险增加；↓ 风险预算逐步恢复。",
+      action:
+        Number.isFinite(attackExposure) &&
+        Number.isFinite(attackTarget) &&
+        attackExposure > attackTarget
+          ? `高于 ${pct(attackTarget)} 目标：优先复核大额高进攻敞口。`
+          : "处于目标内：按 thesis 与风险预算维护，不因短期价格单独加仓。",
+      tone:
+        Number.isFinite(attackExposure) &&
+        Number.isFinite(attackTarget) &&
+        attackExposure > attackTarget
+          ? "tone-red"
+          : "tone-neutral",
+    },
+    account: {
+      definition: TERM_DEFINITIONS.highestAccountLeverage,
+      meaning: "↑ 账户更容易先触发保证金约束；↓ 账户安全垫改善。",
+      action: `${summary.highest_leverage_account || "最高杠杆账户"}：优先核对实时 house requirement 与压力价格。`,
+      tone: "tone-red",
+    },
+  };
+}
+
+function marginMetricGuidance(value) {
+  const yoy = Number(value);
+  return {
+    definition: TERM_DEFINITIONS.finraMarginYoy,
+    meaning: "↑ 全市场融资存量扩张、潜在脆弱性累积；↓ 可能是降温，也可能是被动去杠杆。",
+    action:
+      Number.isFinite(yoy) && yoy > 0
+        ? "融资同比仍为正：高价格压力下不新增杠杆，并监控宽度与信用确认。"
+        : Number.isFinite(yoy)
+          ? "融资同比收缩：先判断健康降温还是被动出清，不直接把下降当买点。"
+          : "数据缺失或滞后：不据此改变仓位，等待下一次正式更新。",
+    tone: Number.isFinite(yoy) && yoy > 0 ? "tone-amber" : "tone-neutral",
+  };
+}
+
+function pressureMetricGuidance(universe) {
+  const state = universe.state_code || "S0";
+  const actions = {
+    S4: "优先降低风险并核对保证金；不要在强制去杠杆证据期接飞刀。",
+    S3: "避免杠杆抄底；压力连续3日低于70且宽度改善后再重估。",
+    S2: "不追涨、不加杠杆；等待压力清除或新的基本面证据。",
+    S1: "控制追涨，在既定风险预算内持有并监控宽度背离。",
+    S5: "只建立观察清单；等待趋势、宽度和第二证据族确认。",
+    S6: "个人风险闸门通过后，才考虑无杠杆、小仓、分批执行。",
+    S0: "信号正常或不足；不因单一分位改变仓位。",
+  };
+  const tones = {
+    S4: "tone-red",
+    S3: "tone-amber",
+    S2: "tone-amber",
+    S1: "tone-amber",
+    S5: "tone-neutral",
+    S6: "tone-green",
+    S0: "tone-neutral",
+  };
+  return {
+    definition: TERM_DEFINITIONS.pricePressure,
+    meaning: "↑ 卖压、波动、回撤或同步下跌增强；↓ 只表示急性压力缓和。",
+    action: actions[state] || actions.S0,
+    tone: tones[state] || tones.S0,
+  };
+}
+
+function coverageMetricGuidance(value) {
+  const coverage = Number(value);
+  return {
+    definition: TERM_DEFINITIONS.fullSessionCoverage,
+    meaning: "↑ 数据更完整、判断置信度提高；↓ 盲区扩大，不代表市场风险下降。",
+    action:
+      Number.isFinite(coverage) && coverage < 0.7
+        ? "完整时段覆盖不足：仅作正常盘代理，不单独确认强制去杠杆。"
+        : "时段覆盖较充分：仍需结合资金流、融资与信用证据确认状态。",
+    tone:
+      Number.isFinite(coverage) && coverage < 0.7
+        ? "tone-amber"
+        : "tone-neutral",
+  };
+}
+
+function metricGuidance(label, text, tone = "") {
+  const row = el("div", `metric-guidance-row ${tone}`.trim());
+  append(
+    row,
+    el("span", "metric-guidance-label", label),
+    el("p", "", text),
+  );
+  return row;
+}
+
+function metricCard(label, value, note, options = {}) {
+  const card = el("article", `metric-card ${options.tone || ""}`.trim());
+  const labelNode = options.definition
+    ? term(label, options.definition, "metric-label")
+    : el("div", "metric-label", label);
   append(
     card,
-    el("div", "metric-label", label),
+    labelNode,
     el("div", "metric-value", value),
     el("p", "metric-note", note),
   );
+  if (options.meaning || options.action) {
+    const guidance = el("div", "metric-guidance");
+    if (options.meaning) {
+      guidance.appendChild(metricGuidance("怎么读", options.meaning));
+    }
+    if (options.action) {
+      guidance.appendChild(
+        metricGuidance("当前行动", options.action, options.tone || ""),
+      );
+    }
+    card.appendChild(guidance);
+  }
   return card;
 }
 
@@ -144,7 +385,15 @@ function table(columns, rows) {
   const tableNode = el("table");
   const thead = el("thead");
   const headerRow = el("tr");
-  columns.forEach((column) => headerRow.appendChild(el("th", "", column.label)));
+  columns.forEach((column) => {
+    const header = el("th");
+    header.appendChild(
+      column.definition
+        ? term(column.label, column.definition)
+        : document.createTextNode(column.label),
+    );
+    headerRow.appendChild(header);
+  });
   thead.appendChild(headerRow);
   const tbody = el("tbody");
   rows.forEach((row) => {
@@ -255,27 +504,32 @@ function renderPersonal() {
   root.appendChild(banner);
 
   const metrics = el("section", "metric-grid");
+  const guidance = portfolioMetricGuidance(summary);
   append(
     metrics,
     metricCard(
       "组合毛杠杆",
       `${number(summary.gross_leverage, 2)}x`,
       `治理红线 ${number(summary.gross_leverage_red, 2)}x`,
+      guidance.leverage,
     ),
     metricCard(
       "回到红线需降毛敞口",
       usd(summary.required_gross_reduction_usd_to_red, true),
       "静态一阶估算，执行前须用券商实时数据重算",
+      guidance.reduction,
     ),
     metricCard(
       "高进攻敞口 / NAV",
       pct(summary.attack_exposure_pct_nav),
       `目标 ${pct(summary.attack_target_pct_nav)}`,
+      guidance.attack,
     ),
     metricCard(
       "最高账户杠杆",
       `${number(summary.highest_account_gross_leverage, 2)}x`,
       `${summary.highest_leverage_account || "—"} · 先核对 house requirement`,
+      guidance.account,
     ),
   );
   root.appendChild(metrics);
@@ -325,15 +579,19 @@ function universeCard(universe, action) {
   track.appendChild(fill);
   const stats = el("div", "stat-grid");
   [
-    ["5日涨跌", pct(universe.benchmark_return_5d)],
-    ["20日回撤", pct(universe.benchmark_drawdown_20d)],
-    ["50日线上方", pct(universe.breadth_above_50d)],
-    ["20日波动", pct(universe.benchmark_realized_vol_20d)],
-    ["20日相关性", number(universe.average_correlation_20d, 2)],
-    ["价格覆盖", pct(universe.price_coverage)],
-  ].forEach(([label, value]) => {
+    ["5日涨跌", pct(universe.benchmark_return_5d), TERM_DEFINITIONS.return5d],
+    ["20日回撤", pct(universe.benchmark_drawdown_20d), TERM_DEFINITIONS.drawdown20d],
+    ["50日线上方", pct(universe.breadth_above_50d), TERM_DEFINITIONS.breadth50],
+    ["20日波动", pct(universe.benchmark_realized_vol_20d), TERM_DEFINITIONS.volatility20],
+    [
+      "20日相关性",
+      number(universe.average_correlation_20d, 2),
+      TERM_DEFINITIONS.correlation20,
+    ],
+    ["价格覆盖", pct(universe.price_coverage), TERM_DEFINITIONS.priceCoverage],
+  ].forEach(([label, value, definition]) => {
     const item = el("div");
-    append(item, el("span", "k", label), el("span", "v", value));
+    append(item, term(label, definition, "k"), el("span", "v", value));
     stats.appendChild(item);
   });
   const macroAction = el("div", "macro-action");
@@ -346,7 +604,11 @@ function universeCard(universe, action) {
     card,
     heading,
     el("div", "pressure-value", number(pressure, 1)),
-    el("p", "metric-note", "价格去杠杆压力分位"),
+    term(
+      "价格去杠杆压力分位",
+      TERM_DEFINITIONS.pricePressure,
+      "metric-note",
+    ),
     track,
     stats,
     macroAction,
@@ -440,27 +702,35 @@ function renderMacro() {
 
   const metrics = el("section", "metric-grid");
   const hero = data.hero;
+  const marginGuidance = marginMetricGuidance(hero.margin_debt_yoy);
   metrics.appendChild(
     metricCard(
       "FINRA 融资余额同比",
       pct(hero.margin_debt_yoy),
       `参考月 ${hero.margin_reference_month || "—"} · 全市场慢频存量`,
+      marginGuidance,
     ),
   );
   data.universes.forEach((universe) => {
+    const guidance = pressureMetricGuidance(universe);
     metrics.appendChild(
       metricCard(
         `${universe.universe_label}压力`,
         number(universe.price_deleveraging_pressure, 1),
         `${universe.state_code || "S0"} ${universe.state_label || "观察"}`,
+        guidance,
       ),
     );
   });
+  const coverageGuidance = coverageMetricGuidance(
+    hero.full_session_market_data_coverage,
+  );
   metrics.appendChild(
     metricCard(
       "完整时段行情覆盖",
       pct(hero.full_session_market_data_coverage),
       `${hero.market_data_session_scope} · 当前主要为正常盘价量`,
+      coverageGuidance,
     ),
   );
   root.appendChild(metrics);
@@ -503,11 +773,39 @@ function renderMacro() {
         { key: "ticker", label: "标的" },
         { key: "company_name", label: "公司" },
         { key: "universe", label: "板块" },
-        { key: "return_5d", label: "5日", numeric: true, render: pct },
-        { key: "drawdown_20d", label: "20日回撤", numeric: true, render: pct },
-        { key: "price_crowding_proxy", label: "拥挤代理", numeric: true, render: number },
-        { key: "price_damage_score", label: "价格损伤", numeric: true, render: number },
-        { key: "risk_level", label: "风险" },
+        {
+          key: "return_5d",
+          label: "5日",
+          numeric: true,
+          render: pct,
+          definition: TERM_DEFINITIONS.return5d,
+        },
+        {
+          key: "drawdown_20d",
+          label: "20日回撤",
+          numeric: true,
+          render: pct,
+          definition: TERM_DEFINITIONS.drawdown20d,
+        },
+        {
+          key: "price_crowding_proxy",
+          label: "拥挤代理",
+          numeric: true,
+          render: number,
+          definition: TERM_DEFINITIONS.crowdingProxy,
+        },
+        {
+          key: "price_damage_score",
+          label: "价格损伤",
+          numeric: true,
+          render: number,
+          definition: TERM_DEFINITIONS.priceDamage,
+        },
+        {
+          key: "risk_level",
+          label: "风险",
+          definition: TERM_DEFINITIONS.tickerRisk,
+        },
       ],
       data.tickers,
     ),
@@ -525,7 +823,13 @@ function renderMacro() {
           render: (value) => el("span", `badge ${riskClass(value)}`, value),
         },
         { key: "latest_observation_at", label: "最新观察" },
-        { key: "coverage_ratio", label: "覆盖", numeric: true, render: pct },
+        {
+          key: "coverage_ratio",
+          label: "覆盖",
+          numeric: true,
+          render: pct,
+          definition: TERM_DEFINITIONS.sourceCoverage,
+        },
         { key: "notes", label: "说明" },
       ],
       data.sources,
