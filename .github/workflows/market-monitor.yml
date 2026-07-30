@@ -1,0 +1,174 @@
+name: Refresh market monitor
+
+on:
+  schedule:
+    # 09:15 Asia/Singapore, Monday through Saturday.
+    - cron: "15 1 * * 1-6"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: market-monitor-publish
+  cancel-in-progress: false
+
+jobs:
+  refresh-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TZ: Asia/Singapore
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      MONITOR_DASHBOARD_PASSWORD: ${{ secrets.MONITOR_DASHBOARD_PASSWORD }}
+      PORTFOLIO_SNAPSHOT_B64: ${{ secrets.PORTFOLIO_SNAPSHOT_B64 }}
+
+    steps:
+      - name: Check out Pages repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check out monitor source
+        uses: actions/checkout@v4
+        with:
+          repository: hominthesky/Personal-finance
+          ref: main
+          path: .monitor-source
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .monitor-source/market_monitor/requirements.txt
+
+      - name: Restore last-known-good public data
+        uses: actions/cache@v4
+        with:
+          path: |
+            .monitor-source/market_monitor/data/processed
+            .monitor-source/market_monitor/state.json
+          key: market-monitor-data-v1-${{ github.run_id }}
+          restore-keys: |
+            market-monitor-data-v1-
+
+      - name: Install dependencies
+        run: >-
+          python -m pip install
+          --disable-pip-version-check
+          -r .monitor-source/market_monitor/requirements.txt
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${FRED_API_KEY}" ]]; then
+            echo "::error::Missing repository secret FRED_API_KEY."
+            exit 1
+          fi
+          if [[ -z "${MONITOR_DASHBOARD_PASSWORD}" ]]; then
+            echo "::error::Missing repository secret MONITOR_DASHBOARD_PASSWORD."
+            exit 1
+          fi
+          if [[ -z "${GOOGLE_SERVICE_ACCOUNT_JSON}" && -z "${PORTFOLIO_SNAPSHOT_B64}" ]]; then
+            echo "::error::Configure GOOGLE_SERVICE_ACCOUNT_JSON or the temporary PORTFOLIO_SNAPSHOT_B64 fallback."
+            exit 1
+          fi
+
+      - name: Refresh audited portfolio snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          snapshot=".monitor-source/market_monitor/manual_inputs/portfolio_snapshot.json"
+          if [[ -n "${GOOGLE_SERVICE_ACCOUNT_JSON}" ]]; then
+            python .monitor-source/market_monitor/refresh_portfolio_snapshot.py \
+              --output "${snapshot}"
+          else
+            printf '%s' "${PORTFOLIO_SNAPSHOT_B64}" | base64 --decode > "${snapshot}"
+            python -m json.tool "${snapshot}" >/dev/null
+            echo "::warning::Using the static portfolio snapshot fallback; its source timestamp is not refreshed."
+          fi
+
+      - name: Run monitor tests
+        working-directory: .monitor-source/market_monitor
+        run: >-
+          python -B -m unittest -v
+          test_monitor.py
+          test_refresh_portfolio_snapshot.py
+
+      - name: Generate current monitor
+        shell: bash
+        working-directory: .monitor-source
+        run: |
+          set -euo pipefail
+          args=(--cadence auto)
+          singapore_day="$(date +%d)"
+          if (( 10#${singapore_day} <= 7 )); then
+            args+=(--sec)
+          fi
+          python -B market_monitor/monitor.py "${args[@]}"
+          python -m json.tool market_monitor/artifacts/snapshot.json >/dev/null
+
+      - name: Build encrypted dashboard
+        working-directory: .monitor-source
+        run: node market_monitor/build_github_pages.mjs
+
+      - name: Publish market-monitor directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir=".monitor-source/market_monitor/site_dist/market-monitor"
+          for file in index.html styles.css app.js payload.enc.json .nojekyll; do
+            test -f "${source_dir}/${file}"
+          done
+          mkdir -p market-monitor
+          cp "${source_dir}/index.html" market-monitor/index.html
+          cp "${source_dir}/styles.css" market-monitor/styles.css
+          cp "${source_dir}/app.js" market-monitor/app.js
+          cp "${source_dir}/payload.enc.json" market-monitor/payload.enc.json
+          cp "${source_dir}/.nojekyll" market-monitor/.nojekyll
+          (
+            cd .monitor-source
+            shasum -a 256 \
+              market_monitor/artifacts/snapshot.json \
+              market_monitor/build_github_pages.mjs \
+              market_monitor/site_src/index.html \
+              market_monitor/site_src/styles.css \
+              market_monitor/site_src/app.js |
+              shasum -a 256 |
+              awk '{print $1}'
+          ) > market-monitor/.publish-fingerprint
+
+          git add -- \
+            market-monitor/.nojekyll \
+            market-monitor/.publish-fingerprint \
+            market-monitor/app.js \
+            market-monitor/index.html \
+            market-monitor/payload.enc.json \
+            market-monitor/styles.css
+          if git diff --cached --quiet; then
+            echo "Dashboard inputs are unchanged; nothing to publish."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update encrypted market monitor data"
+          git push origin HEAD:master
+
+      - name: Verify published page
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error \
+              --max-time 20 \
+              https://zzao.im/market-monitor/ >/dev/null; then
+              echo "Published page is reachable over HTTPS."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Published page did not become reachable over HTTPS."
+          exit 1
