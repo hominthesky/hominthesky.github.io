@@ -613,6 +613,12 @@ label {
   gap: 10px;
 }
 
+/* Do not let the password field collapse when the mobile row stacks. */
+.password-row input {
+  min-height: 50px;
+  flex: 1 0 50px;
+}
+
 input {
   min-width: 0;
   flex: 1;
@@ -634,7 +640,7 @@ input:focus {
   min-width: 128px;
   border: 0;
   border-radius: 12px;
-  color: #06131d;
+  color: #fff;
   background: var(--cyan);
   font-weight: 800;
 }
