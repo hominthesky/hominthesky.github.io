@@ -540,19 +540,19 @@ button {
 }
 
 .brand-mark {
-  display: flex;
-  align-items: center;
-  width: 72px;
+  display: grid;
+  place-items: center;
+  width: 48px;
   height: 48px;
   margin-bottom: 36px;
-  color: #000;
+  background: #fff;
 }
 
-.brand-mark svg {
+.brand-mark img {
   display: block;
   width: 100%;
-  height: auto;
-  fill: currentColor;
+  height: 100%;
+  object-fit: contain;
 }
 
 .eyebrow {
