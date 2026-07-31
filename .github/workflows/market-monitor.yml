@@ -95,10 +95,14 @@ jobs:
 
       - name: Run monitor tests
         working-directory: .monitor-source/market_monitor
-        run: >-
-          python -B -m unittest -v
-          test_monitor.py
-          test_refresh_portfolio_snapshot.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -B -m unittest -v \
+            test_monitor.py \
+            test_broker_activity.py \
+            test_refresh_portfolio_snapshot.py
+          node --test test_build_github_pages.mjs
 
       - name: Generate current monitor
         shell: bash
@@ -115,7 +119,9 @@ jobs:
 
       - name: Build encrypted dashboard
         working-directory: .monitor-source
-        run: node market_monitor/build_github_pages.mjs
+        run: >-
+          node market_monitor/build_github_pages.mjs
+          --preserve-trading-from ../market-monitor/payload.enc.json
 
       - name: Publish market-monitor directory
         shell: bash
