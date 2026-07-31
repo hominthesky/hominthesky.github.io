@@ -10,8 +10,8 @@
       content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
     />
     <title>市场杠杆与持仓风险监控</title>
-    <link rel="stylesheet" href="./styles.css?v=20260731-1" />
-    <script src="./app.js?v=20260731-1" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=20260801-2" />
+    <script src="./app.js?v=20260801-2" defer></script>
   </head>
   <body>
     <main id="unlock-view" class="unlock-view">
@@ -45,68 +45,85 @@
     </main>
 
     <main id="dashboard" class="dashboard" hidden>
-      <header class="dashboard-header">
-        <div>
-          <p class="eyebrow">ZZAO · MARKET LEVERAGE MONITOR</p>
-          <h1>市场杠杆与持仓风险监控</h1>
-          <div id="asof-line" class="asof-line"></div>
+      <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+      <aside id="app-drawer" class="app-drawer" aria-label="主导航">
+        <div class="drawer-topline">
+          <div class="drawer-brand">
+            <div class="brand-mark compact" aria-hidden="true">Z</div>
+            <div class="drawer-brand-copy">
+              <strong>ZZAO Monitor</strong>
+              <span>Private workspace</span>
+            </div>
+          </div>
+          <button id="drawer-toggle" class="icon-button drawer-toggle" type="button" aria-label="收起导航" aria-expanded="true">☰</button>
         </div>
-        <div class="header-actions">
-          <span id="snapshot-status" class="status-pill"></span>
-          <button id="lock-button" class="ghost-button" type="button">锁定</button>
+
+        <nav class="drawer-nav" aria-label="监控功能">
+          <p class="drawer-group-label">风险监控</p>
+          <button id="nav-personal" class="drawer-item" type="button" aria-current="page" data-view="personal">
+            <span class="drawer-icon" aria-hidden="true">◎</span>
+            <span class="drawer-label">持仓风险</span>
+            <span id="personal-tab-alert" class="tab-count"></span>
+          </button>
+          <button id="nav-macro" class="drawer-item" type="button" data-view="macro">
+            <span class="drawer-icon" aria-hidden="true">⌁</span>
+            <span class="drawer-label">宏观与板块</span>
+            <span id="macro-tab-alert" class="tab-count"></span>
+          </button>
+          <p class="drawer-group-label">交易分析</p>
+          <button id="nav-trading" class="drawer-item" type="button" data-view="trading">
+            <span class="drawer-icon" aria-hidden="true">↗</span>
+            <span class="drawer-label">交易复盘</span>
+            <span id="trading-source-alert" class="tab-count"></span>
+          </button>
+        </nav>
+
+        <div class="drawer-footer">
+          <div class="currency-control" role="group" aria-label="金额显示币种">
+            <button class="currency-option" type="button" data-currency="USD" aria-pressed="true">USD</button>
+            <button class="currency-option" type="button" data-currency="CNY" aria-pressed="false">CNY</button>
+          </div>
+          <button id="theme-button" class="drawer-utility" type="button">
+            <span id="theme-icon" class="drawer-icon" aria-hidden="true">◐</span>
+            <span id="theme-label" class="drawer-label">跟随系统</span>
+          </button>
+          <button id="lock-button" class="drawer-utility" type="button">
+            <span class="drawer-icon" aria-hidden="true">⌁</span>
+            <span class="drawer-label">锁定页面</span>
+          </button>
         </div>
-      </header>
+      </aside>
 
-      <nav class="tabs" aria-label="监控视图">
-        <button
-          id="tab-personal"
-          class="tab-button"
-          type="button"
-          role="tab"
-          aria-selected="true"
-          aria-controls="panel-personal"
-          data-tab="personal"
-        >
-          我的持仓
-          <span id="personal-tab-alert" class="tab-count"></span>
-        </button>
-        <button
-          id="tab-macro"
-          class="tab-button"
-          type="button"
-          role="tab"
-          aria-selected="false"
-          aria-controls="panel-macro"
-          data-tab="macro"
-        >
-          宏观与板块
-          <span id="macro-tab-alert" class="tab-count"></span>
-        </button>
-      </nav>
+      <div class="app-main">
+        <header class="dashboard-header">
+          <div class="header-title-row">
+            <button id="mobile-menu-button" class="icon-button mobile-menu-button" type="button" aria-label="打开导航" aria-controls="app-drawer" aria-expanded="false">☰</button>
+            <div>
+              <p id="page-eyebrow" class="eyebrow">PORTFOLIO RISK</p>
+              <h1 id="page-title">持仓风险</h1>
+              <p id="page-subtitle" class="page-subtitle">组合杠杆、风险预算与持仓行动</p>
+            </div>
+          </div>
+          <div class="header-actions">
+            <span id="snapshot-status" class="status-pill"></span>
+          </div>
+        </header>
+        <div id="asof-line" class="asof-line"></div>
 
-      <section
-        id="panel-personal"
-        class="tab-panel"
-        role="tabpanel"
-        aria-labelledby="tab-personal"
-      >
-        <div id="personal-content"></div>
-      </section>
-      <section
-        id="panel-macro"
-        class="tab-panel"
-        role="tabpanel"
-        aria-labelledby="tab-macro"
-        hidden
-      >
-        <div id="macro-content"></div>
-      </section>
+        <section id="panel-personal" class="view-panel" aria-labelledby="nav-personal">
+          <div id="personal-content"></div>
+        </section>
+        <section id="panel-macro" class="view-panel" aria-labelledby="nav-macro" hidden>
+          <div id="macro-content"></div>
+        </section>
+        <section id="panel-trading" class="view-panel" aria-labelledby="nav-trading" hidden>
+          <div id="trading-content"></div>
+        </section>
 
-      <footer>
-        <p>
-          本页面是风险管理辅助工具，不自动下单。事实、推断和行动条件应分别复核；缺失数据不按零处理。
-        </p>
-      </footer>
+        <footer>
+          <p>本页面是风险管理辅助工具，不自动下单。事实、推断和行动条件应分别复核；缺失数据不按零处理。</p>
+        </footer>
+      </div>
     </main>
   </body>
 </html>

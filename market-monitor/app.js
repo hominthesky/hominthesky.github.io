@@ -2,6 +2,26 @@
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
+let displayCurrency = localStorage.getItem("zzao-monitor-currency") || "USD";
+let activeView = localStorage.getItem("zzao-monitor-view") || "personal";
+
+const VIEW_META = {
+  personal: {
+    eyebrow: "PORTFOLIO RISK",
+    title: "持仓风险",
+    subtitle: "组合杠杆、风险预算与逐标的行动",
+  },
+  macro: {
+    eyebrow: "MARKET LEVERAGE",
+    title: "宏观与板块",
+    subtitle: "半导体、存储、核心芯片与纳斯达克压力监测",
+  },
+  trading: {
+    eyebrow: "TRADING REVIEW",
+    title: "交易复盘",
+    subtitle: "日内交易、期权收益、胜率与现金流贡献",
+  },
+};
 
 const byId = (id) => document.getElementById(id);
 
@@ -42,12 +62,18 @@ const TERM_DEFINITIONS = {
     "本次运行中该公开数据源成功取得有效观察值的比例。下降表示证据缺口变大，不代表市场风险改善。",
   netTradingPnl:
     "已完成交易周期的毛收益减去券商可取得费用。股票日内按同一美东监控日净头寸回到零统计，期权按同一合约净头寸回到零统计；未平仓浮盈亏不计入。",
+  netAfterCosts:
+    "股票日内净收益＋期权净收益＋融资/其他利息净额。股票与期权净收益已经扣除可取得的手续费，因此这里不会重复扣费；不包含股息分红。",
   tradeWinRate:
     "盈利的已完成交易周期 ÷ 有明确盈亏的已完成周期。按周期而不是订单或成交笔数统计；样本少时容易失真。",
   profitFactor:
     "盈利周期净利润之和 ÷ 亏损周期净亏损绝对值。大于1表示样本期盈利覆盖亏损，小于1表示策略期望值需要复核。无亏损样本时不显示。",
   cashflowContribution:
     "该交易类别净已实现收益 ÷（股票日内净收益＋期权净收益＋已取得的股息利息）。本金买卖周转不算现金流；若股息利息源未接入，该比例是不完整口径。",
+  dividendIncome:
+    "已取得的 USD 现金股息减去股息预扣税，为税后股息分红现金流；不含股票送股、资本利得和未入账应收股息。",
+  realizedCashflow:
+    "已完成交易毛收益减去可取得的手续费，加上融资/其他利息净额与税后现金股息。代表当前数据源可重建的实收入账现金流；不含本金买卖周转、未实现盈亏及尚未接入的税费。",
 };
 
 function el(tag, className, text) {
@@ -190,12 +216,16 @@ function number(value, digits = 1) {
 
 function usd(value, compact = false) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
-  return new Intl.NumberFormat("en-US", {
+  const fx = Number(monitorData?.meta?.usd_cny_rate);
+  const useCny = displayCurrency === "CNY" && Number.isFinite(fx) && fx > 0;
+  const amount = Number(value) * (useCny ? fx : 1);
+  return new Intl.NumberFormat(useCny ? "zh-CN" : "en-US", {
     style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
+    currency: useCny ? "CNY" : "USD",
+    minimumFractionDigits: compact === true ? 0 : 2,
+    maximumFractionDigits: compact === true ? 1 : 2,
     notation: compact === true ? "compact" : "standard",
-  }).format(Number(value));
+  }).format(amount);
 }
 
 function riskClass(value) {
@@ -542,8 +572,6 @@ function renderPersonal() {
   );
   root.appendChild(metrics);
 
-  root.appendChild(renderTradingPerformance(data.trading || {}, summary));
-
   const actions = section("今天先做什么", "按个人风险预算排序；不是自动交易指令。");
   actions.appendChild(renderActionList(data.actions));
   root.appendChild(actions);
@@ -631,21 +659,35 @@ function renderTradingPerformance(trading, portfolioSummary) {
       el("strong", "", cadenceLabel(period.cadence)),
       el("span", "", `${period.start_date} — ${period.end_date}`),
     );
+    const primary = el(
+      "div",
+      `trading-primary ${Number(period.investable_cashflow) < 0 ? "loss" : "win"}`,
+    );
+    const primaryCopy = el("div");
+    append(
+      primaryCopy,
+      term("实收入账现金流", TERM_DEFINITIONS.realizedCashflow, "trading-primary-label"),
+      el("span", "trading-primary-formula", "已完成交易净收益 + 利息净额 + 税后股息"),
+    );
+    append(
+      primary,
+      primaryCopy,
+      el("strong", "trading-primary-value", usd(period.investable_cashflow)),
+    );
     const stats = el("div", "trading-stats");
     [
       ["股票日内净收益", usd(period.intraday_net_pnl), TERM_DEFINITIONS.netTradingPnl],
       ["股票日内胜率", pct(period.intraday_win_rate), TERM_DEFINITIONS.tradeWinRate],
       ["期权净收益", usd(period.option_net_pnl), TERM_DEFINITIONS.netTradingPnl],
       ["期权胜率", pct(period.option_win_rate), TERM_DEFINITIONS.tradeWinRate],
-      [
-        period.cashflow_scope === "ACTIVE_TRADING_ONLY" ? "活跃交易净现金流" : "已实现现金流",
-        usd(period.investable_cashflow),
-        TERM_DEFINITIONS.cashflowContribution,
-      ],
+      ["交易净利润（扣费息）", usd(period.net_pnl_after_fees_and_interest), TERM_DEFINITIONS.netAfterCosts],
       ["手续费", usd(period.fees), "券商 API 可取得并分摊到已完成周期的佣金及费用。数值越高，对毛收益的侵蚀越大。"],
-      ["股息 / 利息净额", usd(period.passive_cashflow), "USD 股息与预扣税，加上融资或证券借贷利息的净额。下降为负表示融资成本等被动现金流正在侵蚀交易收益。"],
+      ["税后股息分红", usd(period.dividend_cashflow), TERM_DEFINITIONS.dividendIncome],
+      ["股息预扣税", usd(period.dividend_tax_cashflow), "券商已入账的 USD 股息预扣税，通常为负值；绝对值上升表示税款对毛股息的扣减增加。"],
+      ["融资 / 其他利息", usd(period.interest_cashflow), "券商已入账的 USD 融资或证券借贷利息净额。负值扩大表示融资成本正在侵蚀现金流。"],
       ["日内贡献", pct(period.intraday_cashflow_contribution), TERM_DEFINITIONS.cashflowContribution],
       ["期权贡献", pct(period.option_cashflow_contribution), TERM_DEFINITIONS.cashflowContribution],
+      ["股息贡献", pct(period.dividend_cashflow_contribution), TERM_DEFINITIONS.cashflowContribution],
     ].forEach(([label, value, definition]) => {
       const item = el("div", "trading-stat");
       append(item, term(label, definition, "k"), el("strong", "", value));
@@ -653,9 +695,9 @@ function renderTradingPerformance(trading, portfolioSummary) {
     });
     const scopeNote = period.cashflow_scope === "ACTIVE_TRADING_ONLY"
       ? "当前尚未接入股息 / 利息流水，贡献度分母仅含股票日内与期权净收益。"
-      : `贡献度分母包含 USD 股息、税费和利息${period.excluded_non_usd_cashflow_records ? `；另有 ${period.excluded_non_usd_cashflow_records} 条非 USD 流水未换汇、已排除` : ""}。`;
+      : `“交易净利润（扣费息）”不含股息；“已实现现金流”再加税后股息。贡献度分母包含 USD 日内、期权、税后股息和利息${period.excluded_non_usd_cashflow_records ? `；另有 ${period.excluded_non_usd_cashflow_records} 条非 USD 流水未换汇、已排除` : ""}。`;
     const advice = el("p", "trading-advice", `${tradingAction(period, portfolioSummary)} ${scopeNote}`);
-    append(row, head, stats, advice);
+    append(row, head, primary, stats, advice);
     periodList.appendChild(row);
   });
   card.appendChild(periodList);
@@ -685,6 +727,32 @@ function renderTradingPerformance(trading, portfolioSummary) {
     card.appendChild(el("p", "trading-method", trading.meta.methodology));
   }
   return card;
+}
+
+function renderTrading() {
+  const root = byId("trading-content");
+  root.replaceChildren();
+  const trading = monitorData.trading || {};
+  const summary = monitorData.personal.summary;
+  const periods = trading.periods || [];
+  const focus = periods.find((period) => period.cadence === "month") || periods[0];
+  if (focus) {
+    const tone = Number(focus.investable_cashflow) < 0 ? "" : "amber";
+    const banner = el("section", `risk-banner ${tone}`.trim());
+    const copy = el("div");
+    append(
+      copy,
+      el("h2", "", `${cadenceLabel(focus.cadence)}实收入账现金流 ${usd(focus.investable_cashflow)}`),
+      el(
+        "p",
+        "",
+        `${focus.start_date} — ${focus.end_date} · ${tradingAction(focus, summary)}`,
+      ),
+    );
+    append(banner, el("div", "risk-bar"), copy);
+    root.appendChild(banner);
+  }
+  root.appendChild(renderTradingPerformance(trading, summary));
 }
 
 function universeCard(universe, action) {
@@ -967,12 +1035,75 @@ function renderMacro() {
   root.appendChild(sources);
 }
 
-function switchTab(tab) {
-  const personal = tab === "personal";
-  byId("panel-personal").hidden = !personal;
-  byId("panel-macro").hidden = personal;
-  byId("tab-personal").setAttribute("aria-selected", String(personal));
-  byId("tab-macro").setAttribute("aria-selected", String(!personal));
+function setDrawerOpen(open) {
+  const dashboard = byId("dashboard");
+  dashboard.classList.toggle("drawer-open", open);
+  byId("drawer-backdrop").hidden = !open;
+  byId("mobile-menu-button").setAttribute("aria-expanded", String(open));
+}
+
+function switchView(view) {
+  if (!VIEW_META[view]) view = "personal";
+  activeView = view;
+  localStorage.setItem("zzao-monitor-view", view);
+  Object.keys(VIEW_META).forEach((key) => {
+    byId(`panel-${key}`).hidden = key !== view;
+    byId(`nav-${key}`).setAttribute("aria-current", key === view ? "page" : "false");
+  });
+  const meta = VIEW_META[view];
+  byId("page-eyebrow").textContent = meta.eyebrow;
+  byId("page-title").textContent = meta.title;
+  byId("page-subtitle").textContent = meta.subtitle;
+  setDrawerOpen(false);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function renderCurrencyControl() {
+  const rate = Number(monitorData?.meta?.usd_cny_rate);
+  const cnyAvailable = Number.isFinite(rate) && rate > 0;
+  if (!cnyAvailable && displayCurrency === "CNY") displayCurrency = "USD";
+  document.querySelectorAll(".currency-option").forEach((button) => {
+    const selected = button.dataset.currency === displayCurrency;
+    button.setAttribute("aria-pressed", String(selected));
+    if (button.dataset.currency === "CNY") {
+      button.disabled = !cnyAvailable;
+      button.title = cnyAvailable
+        ? `按 FRED DEXCHUS ${monitorData.meta.usd_cny_as_of || "最新"} 汇率换算`
+        : "汇率数据暂不可用";
+    }
+  });
+}
+
+function setCurrency(currency) {
+  if (!['USD', 'CNY'].includes(currency)) return;
+  if (currency === "CNY" && !Number(monitorData?.meta?.usd_cny_rate)) return;
+  displayCurrency = currency;
+  localStorage.setItem("zzao-monitor-currency", currency);
+  renderCurrencyControl();
+  renderPersonal();
+  renderMacro();
+  renderTrading();
+}
+
+function applyThemePreference(preference) {
+  const allowed = ["system", "light", "dark"];
+  const selected = allowed.includes(preference) ? preference : "system";
+  const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const actual = selected === "system" ? (systemDark ? "dark" : "light") : selected;
+  document.documentElement.dataset.theme = actual;
+  document.documentElement.dataset.themePreference = selected;
+  localStorage.setItem("zzao-monitor-theme", selected);
+  const labels = { system: "跟随系统", light: "浅色模式", dark: "深色模式" };
+  const icons = { system: "◐", light: "☼", dark: "☾" };
+  byId("theme-label").textContent = labels[selected];
+  byId("theme-icon").textContent = icons[selected];
+  byId("theme-button").title = `当前：${labels[selected]}；点击切换`;
+}
+
+function cycleTheme() {
+  const current = document.documentElement.dataset.themePreference || "system";
+  const order = ["system", "light", "dark"];
+  applyThemePreference(order[(order.indexOf(current) + 1) % order.length]);
 }
 
 function renderDashboard() {
@@ -981,6 +1112,13 @@ function renderDashboard() {
     el("span", "", `市场截至 ${meta.market_as_of || "—"} ET`),
     el("span", "", `持仓读取 ${meta.portfolio_retrieved_at || "—"}`),
     el("span", "", meta.session_boundary),
+    el(
+      "span",
+      "fx-line",
+      meta.usd_cny_rate
+        ? `展示汇率 1 USD = ${number(meta.usd_cny_rate, 4)} CNY · FRED ${meta.usd_cny_as_of || "—"}`
+        : "CNY 展示汇率暂不可用",
+    ),
   );
   const status = byId("snapshot-status");
   status.textContent = meta.status === "ready" ? "数据已就绪" : "数据部分可用";
@@ -991,9 +1129,17 @@ function renderDashboard() {
   byId("macro-tab-alert").textContent = monitorData.macro.alerts.length
     ? `· ${monitorData.macro.alerts.length}`
     : "";
+  const failedBrokerSources = (monitorData.trading?.sources || []).filter(
+    (source) => source.status !== "OK",
+  ).length;
+  byId("trading-source-alert").textContent = failedBrokerSources
+    ? `· ${failedBrokerSources}`
+    : "";
+  renderCurrencyControl();
   renderPersonal();
   renderMacro();
-  switchTab("personal");
+  renderTrading();
+  switchView(activeView);
 }
 
 byId("unlock-form").addEventListener("submit", async (event) => {
@@ -1024,14 +1170,49 @@ byId("unlock-form").addEventListener("submit", async (event) => {
   }
 });
 
-document.querySelectorAll(".tab-button").forEach((button) => {
-  button.addEventListener("click", () => switchTab(button.dataset.tab));
+document.querySelectorAll(".drawer-item").forEach((button) => {
+  button.addEventListener("click", () => switchView(button.dataset.view));
+});
+
+document.querySelectorAll(".currency-option").forEach((button) => {
+  button.addEventListener("click", () => setCurrency(button.dataset.currency));
+});
+
+byId("theme-button").addEventListener("click", cycleTheme);
+applyThemePreference(document.documentElement.dataset.themePreference || "system");
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (document.documentElement.dataset.themePreference === "system") {
+    applyThemePreference("system");
+  }
+});
+
+byId("mobile-menu-button").addEventListener("click", () => setDrawerOpen(true));
+byId("drawer-backdrop").addEventListener("click", () => setDrawerOpen(false));
+byId("drawer-toggle").addEventListener("click", () => {
+  if (window.matchMedia("(max-width: 900px)").matches) {
+    setDrawerOpen(false);
+    return;
+  }
+  const collapsed = byId("dashboard").classList.toggle("drawer-collapsed");
+  localStorage.setItem("zzao-monitor-drawer", collapsed ? "collapsed" : "open");
+  byId("drawer-toggle").setAttribute("aria-expanded", String(!collapsed));
+  byId("drawer-toggle").setAttribute("aria-label", collapsed ? "展开导航" : "收起导航");
+});
+
+if (localStorage.getItem("zzao-monitor-drawer") === "collapsed") {
+  byId("dashboard").classList.add("drawer-collapsed");
+  byId("drawer-toggle").setAttribute("aria-expanded", "false");
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setDrawerOpen(false);
 });
 
 byId("lock-button").addEventListener("click", () => {
   monitorData = null;
   byId("personal-content").replaceChildren();
   byId("macro-content").replaceChildren();
+  byId("trading-content").replaceChildren();
   byId("dashboard").hidden = true;
   byId("unlock-view").hidden = false;
   byId("password").focus();
