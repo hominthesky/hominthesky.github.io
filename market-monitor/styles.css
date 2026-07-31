@@ -150,9 +150,6 @@ input {
   width: 34px;
   height: 34px;
   margin: 0;
-  border-radius: 10px;
-  color: #07111f;
-  font-size: 16px;
 }
 
 .drawer-brand-copy {
@@ -543,16 +540,19 @@ button {
 }
 
 .brand-mark {
-  display: grid;
-  place-items: center;
-  width: 48px;
+  display: flex;
+  align-items: center;
+  width: 72px;
   height: 48px;
   margin-bottom: 36px;
-  border-radius: 14px;
-  color: var(--bg);
-  background: var(--cyan);
-  font-weight: 900;
-  font-size: 22px;
+  color: #000;
+}
+
+.brand-mark svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  fill: currentColor;
 }
 
 .eyebrow {
