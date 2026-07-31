@@ -679,7 +679,7 @@ function renderTradingPerformance(trading, portfolioSummary) {
     append(
       empty,
       el("strong", "", "等待只读 API 授权"),
-      el("p", "", "连接后将自动回填 2026-05-01 起的美股与期权成交，并按日 / 周 / 月 / 年计算净收益、胜率与现金流贡献。"),
+      el("p", "", "连接后将自动回填 2026-01-01 起的美股与期权成交，并按日 / 周 / 月 / 年计算净收益、胜率与现金流贡献。"),
     );
     card.appendChild(empty);
     return card;
@@ -800,15 +800,25 @@ function renderTradingPerformance(trading, portfolioSummary) {
 }
 
 function tradingChartSeries(rows, cadence) {
+  const components = [
+    "intraday_net_pnl",
+    "option_net_pnl",
+    "dividend_cashflow",
+    "interest_cashflow",
+    "fees",
+  ];
+  const normalized = (row, labels = {}) => ({
+    ...labels,
+    value: Number(row.investable_cashflow || 0),
+    ...Object.fromEntries(components.map((key) => [key, Number(row[key] || 0)])),
+  });
   const ordered = [...(rows || [])]
     .filter((row) => row.date && Number.isFinite(Number(row.investable_cashflow)))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   if (cadence === "day") {
-    return ordered.slice(-30).map((row) => ({
-      label: row.date.slice(5),
-      fullLabel: row.date,
-      value: Number(row.investable_cashflow),
-    }));
+    return ordered.slice(-30).map((row) =>
+      normalized(row, { label: row.date.slice(5), fullLabel: row.date }),
+    );
   }
   const groups = new Map();
   ordered.forEach((row) => {
@@ -821,21 +831,35 @@ function tradingChartSeries(rows, cadence) {
     } else {
       key = row.date.slice(0, 7);
     }
-    groups.set(key, (groups.get(key) || 0) + Number(row.investable_cashflow));
+    const group = groups.get(key) || {
+      investable_cashflow: 0,
+      ...Object.fromEntries(components.map((component) => [component, 0])),
+    };
+    group.investable_cashflow += Number(row.investable_cashflow || 0);
+    components.forEach((component) => {
+      group[component] += Number(row[component] || 0);
+    });
+    groups.set(key, group);
   });
-  let series = [...groups.entries()].map(([key, value]) => ({
-    label: cadence === "week" ? key.slice(5) : key,
-    fullLabel: cadence === "week" ? `周起始 ${key}` : key,
-    value,
-  }));
+  let series = [...groups.entries()].map(([key, row]) =>
+    normalized(row, {
+      label: cadence === "week" ? key.slice(5) : key,
+      fullLabel: cadence === "week" ? `周起始 ${key}` : key,
+    }),
+  );
   if (cadence === "week") return series.slice(-16);
   if (cadence === "month") return series.slice(-12);
   const latestYear = series.at(-1)?.label.slice(0, 4);
   series = series.filter((row) => row.label.startsWith(latestYear));
-  let cumulative = 0;
+  const cumulative = {
+    value: 0,
+    ...Object.fromEntries(components.map((component) => [component, 0])),
+  };
   return series.map((row) => {
-    cumulative += row.value;
-    return { ...row, value: cumulative, fullLabel: `${row.fullLabel} 年内累计` };
+    Object.keys(cumulative).forEach((key) => {
+      cumulative[key] += Number(row[key] || 0);
+    });
+    return { ...row, ...cumulative, fullLabel: `${row.fullLabel} 年内累计` };
   });
 }
 
@@ -906,6 +930,64 @@ function renderTradingCashflowChart(trading) {
       : left + (index / (series.length - 1)) * (width - left - right);
 
   const wrap = el("div", "trading-chart-wrap");
+  const previousTooltip = byId("trading-chart-tooltip");
+  if (previousTooltip) previousTooltip.remove();
+  const tooltip = el("div", "trading-chart-tooltip");
+  tooltip.id = "trading-chart-tooltip";
+  tooltip.hidden = true;
+  let pinnedPoint = null;
+  const closeTooltip = () => {
+    pinnedPoint = null;
+    tooltip.hidden = true;
+  };
+  const showPointTooltip = (anchor, row, pin = false) => {
+    if (pin) pinnedPoint = pinnedPoint === anchor ? null : anchor;
+    if (pin && !pinnedPoint) {
+      tooltip.hidden = true;
+      return;
+    }
+    const head = el("div", "trading-chart-tooltip-head");
+    const close = el("button", "trading-chart-tooltip-close", "×");
+    close.type = "button";
+    close.setAttribute("aria-label", "关闭数据提示");
+    close.addEventListener("click", closeTooltip);
+    append(head, el("strong", "", row.fullLabel), close);
+    const total = el("div", "trading-chart-tooltip-total");
+    append(
+      total,
+      el("span", "", "实收入账现金流"),
+      el("strong", Number(row.value) < 0 ? "negative" : "positive", usd(row.value)),
+    );
+    const details = el("div", "trading-chart-tooltip-details");
+    [
+      ["股票日内净入账", row.intraday_net_pnl],
+      ["期权净入账", row.option_net_pnl],
+      ["税后股息", row.dividend_cashflow],
+      ["融资 / 其他利息", row.interest_cashflow],
+      ["手续费（已含在交易净额）", -Math.abs(Number(row.fees || 0))],
+    ].forEach(([label, value]) => {
+      const detail = el("div");
+      append(detail, el("span", "", label), el("strong", "", usd(value)));
+      details.appendChild(detail);
+    });
+    tooltip.replaceChildren(head, total, details);
+    tooltip.hidden = false;
+    tooltip.style.left = "0px";
+    tooltip.style.top = "0px";
+    const anchorRect = anchor.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const margin = 12;
+    const center = anchorRect.left + anchorRect.width / 2;
+    const leftPosition = Math.min(
+      window.innerWidth - tooltipRect.width - margin,
+      Math.max(margin, center - tooltipRect.width / 2),
+    );
+    const above = anchorRect.top - tooltipRect.height - 10;
+    const topPosition = above >= margin ? above : anchorRect.bottom + 10;
+    tooltip.style.left = `${leftPosition}px`;
+    tooltip.style.top = `${topPosition}px`;
+  };
+  document.body.appendChild(tooltip);
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "trading-cashflow-chart");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
@@ -941,7 +1023,27 @@ function renderTradingCashflowChart(trading) {
     point.setAttribute("cx", String(x(index)));
     point.setAttribute("cy", String(y(row.value)));
     point.setAttribute("r", "3.5");
+    point.setAttribute("tabindex", "0");
+    point.setAttribute("role", "button");
+    point.setAttribute("aria-label", `${row.fullLabel}，实收入账现金流 ${usd(row.value)}`);
     point.setAttribute("class", Number(row.value) < 0 ? "trading-chart-point loss" : "trading-chart-point win");
+    point.addEventListener("mouseenter", () => {
+      if (!pinnedPoint) showPointTooltip(point, row);
+    });
+    point.addEventListener("mouseleave", () => {
+      if (!pinnedPoint) tooltip.hidden = true;
+    });
+    point.addEventListener("focus", () => showPointTooltip(point, row));
+    point.addEventListener("blur", () => {
+      if (!pinnedPoint) tooltip.hidden = true;
+    });
+    point.addEventListener("click", (event) => {
+      event.stopPropagation();
+      showPointTooltip(point, row, true);
+    });
+    point.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeTooltip();
+    });
     const title = document.createElementNS(svg.namespaceURI, "title");
     title.textContent = `${row.fullLabel}：${usd(row.value)}`;
     point.appendChild(title);
@@ -968,6 +1070,25 @@ function renderTrading() {
   const trading = monitorData.trading || {};
   const summary = monitorData.personal.summary;
   const periods = trading.periods || [];
+  const settlement = el("div", "trading-settlement-status");
+  append(
+    settlement,
+    el(
+      "span",
+      "settlement-complete",
+      `已结算至 ${trading.meta?.settled_through || periods[0]?.end_date || "—"} ET`,
+    ),
+  );
+  if (trading.meta?.pending_monitoring_day) {
+    settlement.appendChild(
+      el(
+        "span",
+        "settlement-pending",
+        `${trading.meta.pending_monitoring_day} 进行中 · 20:00 ET 后纳入完整统计`,
+      ),
+    );
+  }
+  root.appendChild(settlement);
   const focus = periods.find((period) => period.cadence === "month") || periods[0];
   if (focus) {
     const tone = Number(focus.investable_cashflow) < 0 ? "" : "amber";
@@ -1288,6 +1409,8 @@ function switchView(view) {
   byId("page-eyebrow").textContent = meta.eyebrow;
   byId("page-title").textContent = meta.title;
   byId("page-subtitle").textContent = meta.subtitle;
+  const chartTooltip = byId("trading-chart-tooltip");
+  if (chartTooltip) chartTooltip.hidden = true;
   setDrawerOpen(false);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }

@@ -1048,6 +1048,32 @@ input:focus {
   padding: 0 16px 18px;
 }
 
+.trading-settlement-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.trading-settlement-status span {
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.settlement-complete {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.settlement-pending {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
 .trading-period {
   padding: 17px 20px;
   border: 1px solid rgba(163, 184, 214, 0.17);
@@ -1205,6 +1231,17 @@ input:focus {
 .trading-chart-point.win { fill: var(--green); }
 .trading-chart-point.loss { fill: var(--red); }
 
+.trading-chart-point {
+  cursor: pointer;
+  transition: r 120ms ease;
+}
+
+.trading-chart-point:hover,
+.trading-chart-point:focus {
+  r: 5.5px;
+  outline: none;
+}
+
 .trading-chart-axis-label {
   fill: var(--muted);
   font-size: 10px;
@@ -1216,6 +1253,84 @@ input:focus {
   padding: 0 22px 20px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.trading-chart-tooltip {
+  position: fixed;
+  z-index: 1200;
+  width: min(290px, calc(100vw - 24px));
+  padding: 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface-3);
+  box-shadow: var(--shadow);
+}
+
+.trading-chart-tooltip-head,
+.trading-chart-tooltip-total,
+.trading-chart-tooltip-details > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trading-chart-tooltip-head {
+  margin-bottom: 10px;
+}
+
+.trading-chart-tooltip-head strong {
+  font-size: 12px;
+}
+
+.trading-chart-tooltip-close {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.trading-chart-tooltip-close:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.trading-chart-tooltip-total {
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.trading-chart-tooltip-total span,
+.trading-chart-tooltip-details span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.trading-chart-tooltip-total strong {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trading-chart-tooltip-total .positive { color: var(--green); }
+.trading-chart-tooltip-total .negative { color: var(--red); }
+
+.trading-chart-tooltip-details {
+  display: grid;
+  gap: 7px;
+  padding-top: 10px;
+}
+
+.trading-chart-tooltip-details strong {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .cashflow-input-head {
@@ -1242,26 +1357,11 @@ input:focus {
 }
 
 .cashflow-group {
-  position: relative;
-  overflow: hidden;
-  padding: 14px 14px 12px 20px;
+  padding: 14px 14px 12px;
   border: 1px solid var(--line);
   border-radius: 11px;
   background: var(--surface-2);
 }
-
-.cashflow-group::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 5px;
-  border-radius: 0;
-}
-
-.cashflow-group.stock::before { background: var(--cyan); }
-.cashflow-group.option::before { background: #9b87f5; }
-.cashflow-group.dividend::before { background: var(--green); }
-.cashflow-group.cost::before { background: var(--amber); }
 
 .cashflow-group-head {
   display: flex;
