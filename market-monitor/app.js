@@ -41,7 +41,7 @@ const TERM_DEFINITIONS = {
   sourceCoverage:
     "本次运行中该公开数据源成功取得有效观察值的比例。下降表示证据缺口变大，不代表市场风险改善。",
   netTradingPnl:
-    "已完成交易周期的毛收益减去券商可取得费用。股票日内按同一美东监控日完成的 FIFO 往返，期权按同一合约的完整开平周期；未平仓浮盈亏不计入。",
+    "已完成交易周期的毛收益减去券商可取得费用。股票日内按同一美东监控日净头寸回到零统计，期权按同一合约净头寸回到零统计；未平仓浮盈亏不计入。",
   tradeWinRate:
     "盈利的已完成交易周期 ÷ 有明确盈亏的已完成周期。按周期而不是订单或成交笔数统计；样本少时容易失真。",
   profitFactor:
@@ -660,7 +660,7 @@ function renderTradingPerformance(trading, portfolioSummary) {
   });
   card.appendChild(periodList);
   if ((trading.strategies || []).length) {
-    const breakdownTitle = el("h3", "trading-breakdown-title", "本年收益来源");
+    const breakdownTitle = el("h3", "trading-breakdown-title", "回填期收益来源");
     const breakdown = el("div", "trading-breakdown");
     trading.strategies.slice(0, 12).forEach((item) => {
       const row = el("div", `trading-breakdown-row ${Number(item.net_pnl) < 0 ? "loss" : "win"}`);
