@@ -40,6 +40,14 @@ const TERM_DEFINITIONS = {
     "个股风险优先分对应的等级：拥挤代理45%＋价格损伤55%。用于排查优先级，不是自动买卖信号。",
   sourceCoverage:
     "本次运行中该公开数据源成功取得有效观察值的比例。下降表示证据缺口变大，不代表市场风险改善。",
+  netTradingPnl:
+    "已完成交易周期的毛收益减去券商可取得费用。股票日内按同一美东监控日完成的 FIFO 往返，期权按同一合约的完整开平周期；未平仓浮盈亏不计入。",
+  tradeWinRate:
+    "盈利的已完成交易周期 ÷ 有明确盈亏的已完成周期。按周期而不是订单或成交笔数统计；样本少时容易失真。",
+  profitFactor:
+    "盈利周期净利润之和 ÷ 亏损周期净亏损绝对值。大于1表示样本期盈利覆盖亏损，小于1表示策略期望值需要复核。无亏损样本时不显示。",
+  cashflowContribution:
+    "该交易类别净已实现收益 ÷（股票日内净收益＋期权净收益＋已取得的股息利息）。本金买卖周转不算现金流；若股息利息源未接入，该比例是不完整口径。",
 };
 
 function el(tag, className, text) {
@@ -534,6 +542,8 @@ function renderPersonal() {
   );
   root.appendChild(metrics);
 
+  root.appendChild(renderTradingPerformance(data.trading || {}, summary));
+
   const actions = section("今天先做什么", "按个人风险预算排序；不是自动交易指令。");
   actions.appendChild(renderActionList(data.actions));
   root.appendChild(actions);
@@ -556,6 +566,125 @@ function renderPersonal() {
     ),
   );
   root.appendChild(strategy);
+}
+
+function cadenceLabel(value) {
+  return { day: "本日", week: "本周", month: "本月", year: "年内累计" }[value] || value;
+}
+
+function tradingAction(period, portfolioSummary) {
+  const trades = Number(period.intraday_closed_trades || 0) + Number(period.option_closed_trades || 0);
+  const pnl = Number(period.active_net_pnl || 0);
+  const weak = [period.intraday_profit_factor, period.option_profit_factor]
+    .filter((value) => value !== null && value !== undefined)
+    .some((value) => Number(value) < 1);
+  if (!trades) return "尚无已完成周期；不要把未平仓浮盈当作可分配现金。";
+  if (trades < 20) return "已完成周期少于20个：胜率与利润因子仅作早期观察，不据此放大仓位。";
+  if (pnl < 0 || weak) return "净收益为负或利润因子低于1：缩小单笔风险，先复盘亏损集中来源。";
+  if (Number(period.passive_cashflow) < 0) {
+    return "股息、税费与利息净额为负：先降低融资利息消耗，再评估可分配现金。";
+  }
+  if (portfolioSummary.portfolio_gate === "RED") {
+    return "组合仍处红色风险闸门：已实现现金优先降低融资与补足安全垫，不扩大杠杆。";
+  }
+  return "先保留税费与风险准备金；仅将稳定、可重复的已实现净现金按风险预算再分配。";
+}
+
+function renderTradingPerformance(trading, portfolioSummary) {
+  const sources = trading.sources || [];
+  const connected = sources.filter((row) => row.status === "OK");
+  const card = section(
+    "日内交易与期权现金流",
+    "美东 [T-1 20:00, T 20:00) 为一日；仅统计已完成周期和可取得费用，不含未实现盈亏。",
+  );
+  const sourceLine = el("div", "broker-source-line");
+  if (!sources.length) {
+    sourceLine.appendChild(el("span", "broker-source missing", "Futu / Tiger API 未连接"));
+  } else {
+    sources.forEach((source) => {
+      const statusClass = source.status === "OK" ? "ok" : source.status === "FAILED" ? "failed" : "missing";
+      const chip = el("span", `broker-source ${statusClass}`);
+      chip.title = source.notes || "";
+      chip.textContent = `${source.broker} · ${source.status === "OK" ? `${source.records || 0} 笔成交` : source.status}`;
+      sourceLine.appendChild(chip);
+    });
+  }
+  card.appendChild(sourceLine);
+
+  if (!connected.length) {
+    const empty = el("div", "trading-empty");
+    append(
+      empty,
+      el("strong", "", "等待只读 API 授权"),
+      el("p", "", "连接后将自动回填 2026-05-01 起的美股与期权成交，并按日 / 周 / 月 / 年计算净收益、胜率与现金流贡献。"),
+    );
+    card.appendChild(empty);
+    return card;
+  }
+
+  const periodList = el("div", "trading-period-list");
+  (trading.periods || []).forEach((period) => {
+    const row = el("article", `trading-period ${Number(period.active_net_pnl) < 0 ? "tone-red" : "tone-green"}`);
+    const head = el("div", "trading-period-head");
+    append(
+      head,
+      el("strong", "", cadenceLabel(period.cadence)),
+      el("span", "", `${period.start_date} — ${period.end_date}`),
+    );
+    const stats = el("div", "trading-stats");
+    [
+      ["股票日内净收益", usd(period.intraday_net_pnl), TERM_DEFINITIONS.netTradingPnl],
+      ["股票日内胜率", pct(period.intraday_win_rate), TERM_DEFINITIONS.tradeWinRate],
+      ["期权净收益", usd(period.option_net_pnl), TERM_DEFINITIONS.netTradingPnl],
+      ["期权胜率", pct(period.option_win_rate), TERM_DEFINITIONS.tradeWinRate],
+      [
+        period.cashflow_scope === "ACTIVE_TRADING_ONLY" ? "活跃交易净现金流" : "已实现现金流",
+        usd(period.investable_cashflow),
+        TERM_DEFINITIONS.cashflowContribution,
+      ],
+      ["手续费", usd(period.fees), "券商 API 可取得并分摊到已完成周期的佣金及费用。数值越高，对毛收益的侵蚀越大。"],
+      ["股息 / 利息净额", usd(period.passive_cashflow), "USD 股息与预扣税，加上融资或证券借贷利息的净额。下降为负表示融资成本等被动现金流正在侵蚀交易收益。"],
+      ["日内贡献", pct(period.intraday_cashflow_contribution), TERM_DEFINITIONS.cashflowContribution],
+      ["期权贡献", pct(period.option_cashflow_contribution), TERM_DEFINITIONS.cashflowContribution],
+    ].forEach(([label, value, definition]) => {
+      const item = el("div", "trading-stat");
+      append(item, term(label, definition, "k"), el("strong", "", value));
+      stats.appendChild(item);
+    });
+    const scopeNote = period.cashflow_scope === "ACTIVE_TRADING_ONLY"
+      ? "当前尚未接入股息 / 利息流水，贡献度分母仅含股票日内与期权净收益。"
+      : `贡献度分母包含 USD 股息、税费和利息${period.excluded_non_usd_cashflow_records ? `；另有 ${period.excluded_non_usd_cashflow_records} 条非 USD 流水未换汇、已排除` : ""}。`;
+    const advice = el("p", "trading-advice", `${tradingAction(period, portfolioSummary)} ${scopeNote}`);
+    append(row, head, stats, advice);
+    periodList.appendChild(row);
+  });
+  card.appendChild(periodList);
+  if ((trading.strategies || []).length) {
+    const breakdownTitle = el("h3", "trading-breakdown-title", "本年收益来源");
+    const breakdown = el("div", "trading-breakdown");
+    trading.strategies.slice(0, 12).forEach((item) => {
+      const row = el("div", `trading-breakdown-row ${Number(item.net_pnl) < 0 ? "loss" : "win"}`);
+      const identity = el("div");
+      append(
+        identity,
+        el("strong", "", item.symbol),
+        el("span", "", `${item.broker} · ${item.category}`),
+      );
+      const result = el("div", "trading-breakdown-result");
+      append(
+        result,
+        el("strong", "", usd(item.net_pnl)),
+        el("span", "", `${item.closed_trades} 个周期 · 胜率 ${pct(item.win_rate)}`),
+      );
+      append(row, identity, result);
+      breakdown.appendChild(row);
+    });
+    append(card, breakdownTitle, breakdown);
+  }
+  if (trading.meta?.methodology) {
+    card.appendChild(el("p", "trading-method", trading.meta.methodology));
+  }
+  return card;
 }
 
 function universeCard(universe, action) {
