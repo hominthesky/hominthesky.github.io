@@ -1237,9 +1237,24 @@ input:focus {
 }
 
 .trading-chart-point:hover,
-.trading-chart-point:focus {
+.trading-chart-point:focus,
+.trading-chart-point.active {
   r: 5.5px;
   outline: none;
+}
+
+.trading-chart-guide {
+  stroke: color-mix(in srgb, var(--muted) 42%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.trading-chart-hit-area {
+  fill: transparent;
+  cursor: crosshair;
+  pointer-events: all;
 }
 
 .trading-chart-axis-label {

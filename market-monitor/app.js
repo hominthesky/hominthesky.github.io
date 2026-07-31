@@ -936,9 +936,17 @@ function renderTradingCashflowChart(trading) {
   tooltip.id = "trading-chart-tooltip";
   tooltip.hidden = true;
   let pinnedPoint = null;
+  let activePoint = null;
+  let guideLine = null;
+  const clearActivePoint = () => {
+    activePoint?.classList.remove("active");
+    activePoint = null;
+    if (guideLine) guideLine.setAttribute("visibility", "hidden");
+  };
   const closeTooltip = () => {
     pinnedPoint = null;
     tooltip.hidden = true;
+    clearActivePoint();
   };
   const showPointTooltip = (anchor, row, pin = false) => {
     if (pin) pinnedPoint = pinnedPoint === anchor ? null : anchor;
@@ -1018,7 +1026,15 @@ function renderTradingCashflowChart(trading) {
   );
   polyline.setAttribute("class", "trading-chart-line");
   svg.appendChild(polyline);
-  series.forEach((row, index) => {
+
+  guideLine = document.createElementNS(svg.namespaceURI, "line");
+  guideLine.setAttribute("y1", String(top));
+  guideLine.setAttribute("y2", String(bottom));
+  guideLine.setAttribute("class", "trading-chart-guide");
+  guideLine.setAttribute("visibility", "hidden");
+  svg.appendChild(guideLine);
+
+  const points = series.map((row, index) => {
     const point = document.createElementNS(svg.namespaceURI, "circle");
     point.setAttribute("cx", String(x(index)));
     point.setAttribute("cy", String(y(row.value)));
@@ -1027,27 +1043,42 @@ function renderTradingCashflowChart(trading) {
     point.setAttribute("role", "button");
     point.setAttribute("aria-label", `${row.fullLabel}，实收入账现金流 ${usd(row.value)}`);
     point.setAttribute("class", Number(row.value) < 0 ? "trading-chart-point loss" : "trading-chart-point win");
-    point.addEventListener("mouseenter", () => {
-      if (!pinnedPoint) showPointTooltip(point, row);
-    });
-    point.addEventListener("mouseleave", () => {
-      if (!pinnedPoint) tooltip.hidden = true;
-    });
-    point.addEventListener("focus", () => showPointTooltip(point, row));
-    point.addEventListener("blur", () => {
-      if (!pinnedPoint) tooltip.hidden = true;
-    });
-    point.addEventListener("click", (event) => {
-      event.stopPropagation();
-      showPointTooltip(point, row, true);
-    });
-    point.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeTooltip();
-    });
     const title = document.createElementNS(svg.namespaceURI, "title");
     title.textContent = `${row.fullLabel}：${usd(row.value)}`;
     point.appendChild(title);
     svg.appendChild(point);
+    return point;
+  });
+
+  const activatePoint = (index, pin = false) => {
+    const point = points[index];
+    const row = series[index];
+    if (!point || !row) return;
+    activePoint?.classList.remove("active");
+    activePoint = point;
+    activePoint.classList.add("active");
+    guideLine.setAttribute("x1", String(x(index)));
+    guideLine.setAttribute("x2", String(x(index)));
+    guideLine.removeAttribute("visibility");
+    showPointTooltip(point, row, pin);
+    if (pin && !pinnedPoint) clearActivePoint();
+  };
+
+  points.forEach((point, index) => {
+    point.addEventListener("focus", () => activatePoint(index));
+    point.addEventListener("blur", () => {
+      if (!pinnedPoint) {
+        tooltip.hidden = true;
+        clearActivePoint();
+      }
+    });
+    point.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activatePoint(index, true);
+      }
+      if (event.key === "Escape") closeTooltip();
+    });
   });
   [0, series.length - 1].forEach((index) => {
     if (index < 0 || !series[index]) return;
@@ -1059,6 +1090,40 @@ function renderTradingCashflowChart(trading) {
     label.textContent = series[index].label;
     svg.appendChild(label);
   });
+
+  const hitArea = document.createElementNS(svg.namespaceURI, "rect");
+  hitArea.setAttribute("x", String(left));
+  hitArea.setAttribute("y", String(top));
+  hitArea.setAttribute("width", String(width - left - right));
+  hitArea.setAttribute("height", String(bottom - top));
+  hitArea.setAttribute("class", "trading-chart-hit-area");
+  const nearestPointIndex = (event) => {
+    const matrix = svg.getScreenCTM();
+    let localX;
+    if (matrix) {
+      const pointer = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+      localX = pointer.x;
+    } else {
+      const bounds = svg.getBoundingClientRect();
+      localX = ((event.clientX - bounds.left) / bounds.width) * width;
+    }
+    if (series.length === 1) return 0;
+    const ratio = (localX - left) / (width - left - right);
+    return Math.max(0, Math.min(series.length - 1, Math.round(ratio * (series.length - 1))));
+  };
+  hitArea.addEventListener("pointermove", (event) => {
+    if (!pinnedPoint) activatePoint(nearestPointIndex(event));
+  });
+  hitArea.addEventListener("pointerleave", () => {
+    if (!pinnedPoint) {
+      tooltip.hidden = true;
+      clearActivePoint();
+    }
+  });
+  hitArea.addEventListener("click", (event) => {
+    activatePoint(nearestPointIndex(event), true);
+  });
+  svg.appendChild(hitArea);
   wrap.appendChild(svg);
   card.appendChild(wrap);
   return card;
