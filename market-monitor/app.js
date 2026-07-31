@@ -667,8 +667,16 @@ function renderTradingPerformance(trading, portfolioSummary) {
     sources.forEach((source) => {
       const statusClass = source.status === "OK" ? "ok" : source.status === "FAILED" ? "failed" : "missing";
       const chip = el("span", `broker-source ${statusClass}`);
-      chip.title = source.notes || "";
-      chip.textContent = `${source.broker} · ${source.status === "OK" ? `${source.records || 0} 笔成交` : source.status}`;
+      const backfillStart = source.backfill_start || trading.meta?.backfill_start;
+      const latestDate = String(source.latest_observation_at || "").slice(0, 10);
+      const scope = backfillStart ? `${backfillStart} 起累计` : "累计";
+      const freshness = latestDate ? ` · 最新成交 ${latestDate}` : "";
+      chip.title = [
+        `${scope}成交记录；不是当日成交笔数。`,
+        latestDate ? `最近一笔成交时间：${source.latest_observation_at}` : "",
+        source.notes || "",
+      ].filter(Boolean).join("\n");
+      chip.textContent = `${source.broker} · ${source.status === "OK" ? `${scope} ${Number(source.records || 0).toLocaleString()} 笔${freshness}` : source.status}`;
       sourceLine.appendChild(chip);
     });
   }
