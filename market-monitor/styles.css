@@ -1111,6 +1111,217 @@ input:focus {
 .trading-primary.win .trading-primary-value { color: var(--green); }
 .trading-primary.loss .trading-primary-value { color: var(--red); }
 
+.chart-cadence-control {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
+.chart-cadence-button {
+  min-width: 38px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.chart-cadence-button:hover {
+  color: var(--text);
+}
+
+.chart-cadence-button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.trading-chart-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 22px 8px;
+}
+
+.trading-chart-summary span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.trading-chart-summary strong {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+
+.trading-chart-summary .positive { color: var(--green); }
+.trading-chart-summary .negative { color: var(--red); }
+
+.trading-chart-wrap {
+  overflow-x: auto;
+  padding: 0 14px 16px;
+}
+
+.trading-cashflow-chart {
+  display: block;
+  width: 100%;
+  min-width: 620px;
+  height: 250px;
+}
+
+.trading-chart-grid,
+.trading-chart-zero {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.trading-chart-zero {
+  stroke: var(--line-strong);
+}
+
+.trading-chart-line {
+  fill: none;
+  stroke: var(--cyan);
+  stroke-width: 2.25;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  vector-effect: non-scaling-stroke;
+}
+
+.trading-chart-point {
+  stroke: var(--card);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.trading-chart-point.win { fill: var(--green); }
+.trading-chart-point.loss { fill: var(--red); }
+
+.trading-chart-axis-label {
+  fill: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trading-chart-empty {
+  margin: 0;
+  padding: 0 22px 20px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cashflow-input-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 10px;
+}
+
+.cashflow-input-head strong {
+  font-size: 13px;
+}
+
+.cashflow-input-head span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.cashflow-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cashflow-group {
+  position: relative;
+  overflow: hidden;
+  padding: 14px 14px 12px 20px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-2);
+}
+
+.cashflow-group::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  border-radius: 0;
+}
+
+.cashflow-group.stock::before { background: var(--cyan); }
+.cashflow-group.option::before { background: #9b87f5; }
+.cashflow-group.dividend::before { background: var(--green); }
+.cashflow-group.cost::before { background: var(--amber); }
+
+.cashflow-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+}
+
+.cashflow-group-head strong {
+  font-size: 13px;
+}
+
+.cashflow-group-head span {
+  color: var(--muted);
+  font-size: 10px;
+  text-align: right;
+}
+
+.cashflow-metric-list {
+  border-top: 1px solid var(--line);
+}
+
+.cashflow-metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cashflow-metric-label {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.cashflow-metric-value {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cashflow-metric.primary .cashflow-metric-label,
+.cashflow-metric.primary .cashflow-metric-value {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.cashflow-metric-value.negative { color: var(--red); }
+.cashflow-metric.primary .cashflow-metric-value.positive { color: var(--green); }
+
+.cashflow-group-footer {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .trading-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1630,6 +1841,20 @@ footer {
 
   .trading-breakdown {
     grid-template-columns: 1fr;
+  }
+
+  .cashflow-groups {
+    grid-template-columns: 1fr;
+  }
+
+  .cashflow-input-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .section-head:has(.chart-cadence-control) {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .trading-period-head,

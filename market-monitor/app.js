@@ -4,6 +4,7 @@ const payloadUrl = "./payload.enc.json";
 let monitorData = null;
 let displayCurrency = localStorage.getItem("zzao-monitor-currency") || "USD";
 let activeView = localStorage.getItem("zzao-monitor-view") || "personal";
+let tradingChartCadence = localStorage.getItem("zzao-monitor-trading-chart") || "day";
 
 const VIEW_META = {
   personal: {
@@ -62,6 +63,8 @@ const TERM_DEFINITIONS = {
     "本次运行中该公开数据源成功取得有效观察值的比例。下降表示证据缺口变大，不代表市场风险改善。",
   netTradingPnl:
     "已完成交易周期的毛收益减去券商可取得费用。股票日内按同一美东监控日净头寸回到零统计，期权按同一合约净头寸回到零统计；未平仓浮盈亏不计入。",
+  grossTradingPnl:
+    "已完成交易周期在扣除券商可取得手续费之前的收益。它用于解释成本侵蚀，不代表最终可支配现金。",
   netAfterCosts:
     "股票日内净收益＋期权净收益＋融资/其他利息净额。股票与期权净收益已经扣除可取得的手续费，因此这里不会重复扣费；不包含股息分红。",
   tradeWinRate:
@@ -618,6 +621,38 @@ function tradingAction(period, portfolioSummary) {
   return "先保留税费与风险准备金；仅将稳定、可重复的已实现净现金按风险预算再分配。";
 }
 
+function cashflowMetric(label, amount, definition, emphasis = false) {
+  const item = el("div", `cashflow-metric ${emphasis ? "primary" : ""}`.trim());
+  const numericAmount = Number(amount);
+  const valueClass = Number.isFinite(numericAmount)
+    ? numericAmount < 0
+      ? "negative"
+      : numericAmount > 0
+        ? "positive"
+        : ""
+    : "";
+  append(
+    item,
+    term(label, definition, "cashflow-metric-label"),
+    el("strong", `cashflow-metric-value ${valueClass}`.trim(), usd(amount)),
+  );
+  return item;
+}
+
+function cashflowGroup(title, subtitle, tone, metrics, footer) {
+  const group = el("section", `cashflow-group ${tone}`);
+  const head = el("div", "cashflow-group-head");
+  append(head, el("strong", "", title), el("span", "", subtitle));
+  const list = el("div", "cashflow-metric-list");
+  metrics.forEach((metric) => {
+    list.appendChild(
+      cashflowMetric(metric.label, metric.value, metric.definition, metric.primary),
+    );
+  });
+  append(group, head, list, el("p", "cashflow-group-footer", footer));
+  return group;
+}
+
 function renderTradingPerformance(trading, portfolioSummary) {
   const sources = trading.sources || [];
   const connected = sources.filter((row) => row.status === "OK");
@@ -674,30 +709,65 @@ function renderTradingPerformance(trading, portfolioSummary) {
       primaryCopy,
       el("strong", "trading-primary-value", usd(period.investable_cashflow)),
     );
-    const stats = el("div", "trading-stats");
-    [
-      ["股票日内净收益", usd(period.intraday_net_pnl), TERM_DEFINITIONS.netTradingPnl],
-      ["股票日内胜率", pct(period.intraday_win_rate), TERM_DEFINITIONS.tradeWinRate],
-      ["期权净收益", usd(period.option_net_pnl), TERM_DEFINITIONS.netTradingPnl],
-      ["期权胜率", pct(period.option_win_rate), TERM_DEFINITIONS.tradeWinRate],
-      ["交易净利润（扣费息）", usd(period.net_pnl_after_fees_and_interest), TERM_DEFINITIONS.netAfterCosts],
-      ["手续费", usd(period.fees), "券商 API 可取得并分摊到已完成周期的佣金及费用。数值越高，对毛收益的侵蚀越大。"],
-      ["税后股息分红", usd(period.dividend_cashflow), TERM_DEFINITIONS.dividendIncome],
-      ["股息预扣税", usd(period.dividend_tax_cashflow), "券商已入账的 USD 股息预扣税，通常为负值；绝对值上升表示税款对毛股息的扣减增加。"],
-      ["融资 / 其他利息", usd(period.interest_cashflow), "券商已入账的 USD 融资或证券借贷利息净额。负值扩大表示融资成本正在侵蚀现金流。"],
-      ["日内贡献", pct(period.intraday_cashflow_contribution), TERM_DEFINITIONS.cashflowContribution],
-      ["期权贡献", pct(period.option_cashflow_contribution), TERM_DEFINITIONS.cashflowContribution],
-      ["股息贡献", pct(period.dividend_cashflow_contribution), TERM_DEFINITIONS.cashflowContribution],
-    ].forEach(([label, value, definition]) => {
-      const item = el("div", "trading-stat");
-      append(item, term(label, definition, "k"), el("strong", "", value));
-      stats.appendChild(item);
-    });
+    const inputsHead = el("div", "cashflow-input-head");
+    append(
+      inputsHead,
+      el("strong", "", "现金流输入拆解"),
+      el("span", "", "按类别从未扣成本金额核对到实际净入账"),
+    );
+    const inputs = el("div", "cashflow-groups");
+    append(
+      inputs,
+      cashflowGroup(
+        "股票日内",
+        `${period.intraday_closed_trades || 0} 个完成周期`,
+        "stock",
+        [
+          { label: "毛收益（未扣手续费）", value: period.intraday_gross_pnl, definition: TERM_DEFINITIONS.grossTradingPnl },
+          { label: "手续费成本", value: -Number(period.intraday_fees || 0), definition: "已分摊到股票日内完整周期的佣金及费用，以负数显示。" },
+          { label: "扣费后净入账", value: period.intraday_net_pnl, definition: TERM_DEFINITIONS.netTradingPnl, primary: true },
+        ],
+        `胜率 ${pct(period.intraday_win_rate)} · 利润因子 ${number(period.intraday_profit_factor, 2)} · 现金流贡献 ${pct(period.intraday_cashflow_contribution)}`,
+      ),
+      cashflowGroup(
+        "期权",
+        `${period.option_closed_trades || 0} 个完成周期`,
+        "option",
+        [
+          { label: "毛收益（未扣手续费）", value: period.option_gross_pnl, definition: TERM_DEFINITIONS.grossTradingPnl },
+          { label: "手续费成本", value: -Number(period.option_fees || 0), definition: "已分摊到期权完整持仓周期的佣金及费用，以负数显示。" },
+          { label: "扣费后净入账", value: period.option_net_pnl, definition: TERM_DEFINITIONS.netTradingPnl, primary: true },
+        ],
+        `胜率 ${pct(period.option_win_rate)} · 利润因子 ${number(period.option_profit_factor, 2)} · 现金流贡献 ${pct(period.option_cashflow_contribution)}`,
+      ),
+      cashflowGroup(
+        "股息分红",
+        "已入账 USD 现金股息",
+        "dividend",
+        [
+          { label: "税前现金股息", value: period.dividend_gross_cashflow, definition: "券商已入账的 USD 现金股息毛额，尚未扣除股息预扣税。" },
+          { label: "股息预扣税", value: period.dividend_tax_cashflow, definition: "券商已入账的 USD 股息预扣税，通常为负值。" },
+          { label: "税后实际入账", value: period.dividend_cashflow, definition: TERM_DEFINITIONS.dividendIncome, primary: true },
+        ],
+        `现金流贡献 ${pct(period.dividend_cashflow_contribution)} · 不含未入账应收股息`,
+      ),
+      cashflowGroup(
+        "账户成本",
+        "交易结果与融资利息",
+        "cost",
+        [
+          { label: "交易净收益（已扣手续费）", value: period.active_net_pnl, definition: TERM_DEFINITIONS.netTradingPnl },
+          { label: "融资 / 其他利息", value: period.interest_cashflow, definition: "券商已入账的 USD 融资或证券借贷利息净额；负值表示现金流成本。" },
+          { label: "扣费息后交易净利润", value: period.net_pnl_after_fees_and_interest, definition: TERM_DEFINITIONS.netAfterCosts, primary: true },
+        ],
+        `合计手续费 ${usd(-Number(period.fees || 0))} · 不含税后股息`,
+      ),
+    );
     const scopeNote = period.cashflow_scope === "ACTIVE_TRADING_ONLY"
       ? "当前尚未接入股息 / 利息流水，贡献度分母仅含股票日内与期权净收益。"
       : `“交易净利润（扣费息）”不含股息；“已实现现金流”再加税后股息。贡献度分母包含 USD 日内、期权、税后股息和利息${period.excluded_non_usd_cashflow_records ? `；另有 ${period.excluded_non_usd_cashflow_records} 条非 USD 流水未换汇、已排除` : ""}。`;
     const advice = el("p", "trading-advice", `${tradingAction(period, portfolioSummary)} ${scopeNote}`);
-    append(row, head, primary, stats, advice);
+    append(row, head, primary, inputsHead, inputs, advice);
     periodList.appendChild(row);
   });
   card.appendChild(periodList);
@@ -729,6 +799,169 @@ function renderTradingPerformance(trading, portfolioSummary) {
   return card;
 }
 
+function tradingChartSeries(rows, cadence) {
+  const ordered = [...(rows || [])]
+    .filter((row) => row.date && Number.isFinite(Number(row.investable_cashflow)))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  if (cadence === "day") {
+    return ordered.slice(-30).map((row) => ({
+      label: row.date.slice(5),
+      fullLabel: row.date,
+      value: Number(row.investable_cashflow),
+    }));
+  }
+  const groups = new Map();
+  ordered.forEach((row) => {
+    const date = new Date(`${row.date}T00:00:00Z`);
+    let key;
+    if (cadence === "week") {
+      const monday = new Date(date);
+      monday.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+      key = monday.toISOString().slice(0, 10);
+    } else {
+      key = row.date.slice(0, 7);
+    }
+    groups.set(key, (groups.get(key) || 0) + Number(row.investable_cashflow));
+  });
+  let series = [...groups.entries()].map(([key, value]) => ({
+    label: cadence === "week" ? key.slice(5) : key,
+    fullLabel: cadence === "week" ? `周起始 ${key}` : key,
+    value,
+  }));
+  if (cadence === "week") return series.slice(-16);
+  if (cadence === "month") return series.slice(-12);
+  const latestYear = series.at(-1)?.label.slice(0, 4);
+  series = series.filter((row) => row.label.startsWith(latestYear));
+  let cumulative = 0;
+  return series.map((row) => {
+    cumulative += row.value;
+    return { ...row, value: cumulative, fullLabel: `${row.fullLabel} 年内累计` };
+  });
+}
+
+function renderTradingCashflowChart(trading) {
+  const descriptions = {
+    day: "最近30个有记录的美东监控日",
+    week: "最近16周，每周实收入账现金流",
+    month: "最近12个月，每月实收入账现金流",
+    year: "本年度按月累计实收入账现金流",
+  };
+  const card = section("实收入账现金流趋势", descriptions[tradingChartCadence]);
+  const controls = el("div", "chart-cadence-control");
+  [["day", "日"], ["week", "周"], ["month", "月"], ["year", "年"]].forEach(
+    ([value, label]) => {
+      const button = el("button", "chart-cadence-button", label);
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(value === tradingChartCadence));
+      button.addEventListener("click", () => {
+        tradingChartCadence = value;
+        localStorage.setItem("zzao-monitor-trading-chart", value);
+        renderTrading();
+      });
+      controls.appendChild(button);
+    },
+  );
+  card.querySelector(".section-head").appendChild(controls);
+
+  const series = tradingChartSeries(trading.daily, tradingChartCadence);
+  if (!series.length) {
+    card.appendChild(el("p", "trading-chart-empty", "当前时间范围没有可绘制的已入账数据。"));
+    return card;
+  }
+
+  const latest = series.at(-1);
+  const summary = el("div", "trading-chart-summary");
+  append(
+    summary,
+    el("span", "", latest.fullLabel),
+    el(
+      "strong",
+      Number(latest.value) < 0 ? "negative" : "positive",
+      usd(latest.value),
+    ),
+  );
+  card.appendChild(summary);
+
+  const width = 820;
+  const height = 250;
+  const left = 72;
+  const right = 20;
+  const top = 18;
+  const bottom = 215;
+  const values = series.map((row) => Number(row.value));
+  let minimum = Math.min(0, ...values);
+  let maximum = Math.max(0, ...values);
+  if (minimum === maximum) {
+    minimum -= 1;
+    maximum += 1;
+  }
+  const padding = (maximum - minimum) * 0.08;
+  minimum -= padding;
+  maximum += padding;
+  const y = (value) =>
+    top + ((maximum - Number(value)) / (maximum - minimum)) * (bottom - top);
+  const x = (index) =>
+    series.length === 1
+      ? (left + width - right) / 2
+      : left + (index / (series.length - 1)) * (width - left - right);
+
+  const wrap = el("div", "trading-chart-wrap");
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "trading-cashflow-chart");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `实收入账现金流${descriptions[tradingChartCadence]}折线图`);
+
+  [maximum, 0, minimum].forEach((value) => {
+    const line = document.createElementNS(svg.namespaceURI, "line");
+    line.setAttribute("x1", String(left));
+    line.setAttribute("x2", String(width - right));
+    line.setAttribute("y1", String(y(value)));
+    line.setAttribute("y2", String(y(value)));
+    line.setAttribute("class", value === 0 ? "trading-chart-zero" : "trading-chart-grid");
+    svg.appendChild(line);
+    const label = document.createElementNS(svg.namespaceURI, "text");
+    label.setAttribute("x", String(left - 9));
+    label.setAttribute("y", String(y(value) + 4));
+    label.setAttribute("text-anchor", "end");
+    label.setAttribute("class", "trading-chart-axis-label");
+    label.textContent = usd(value, true);
+    svg.appendChild(label);
+  });
+
+  const polyline = document.createElementNS(svg.namespaceURI, "polyline");
+  polyline.setAttribute(
+    "points",
+    series.map((row, index) => `${x(index)},${y(row.value)}`).join(" "),
+  );
+  polyline.setAttribute("class", "trading-chart-line");
+  svg.appendChild(polyline);
+  series.forEach((row, index) => {
+    const point = document.createElementNS(svg.namespaceURI, "circle");
+    point.setAttribute("cx", String(x(index)));
+    point.setAttribute("cy", String(y(row.value)));
+    point.setAttribute("r", "3.5");
+    point.setAttribute("class", Number(row.value) < 0 ? "trading-chart-point loss" : "trading-chart-point win");
+    const title = document.createElementNS(svg.namespaceURI, "title");
+    title.textContent = `${row.fullLabel}：${usd(row.value)}`;
+    point.appendChild(title);
+    svg.appendChild(point);
+  });
+  [0, series.length - 1].forEach((index) => {
+    if (index < 0 || !series[index]) return;
+    const label = document.createElementNS(svg.namespaceURI, "text");
+    label.setAttribute("x", String(x(index)));
+    label.setAttribute("y", String(height - 10));
+    label.setAttribute("text-anchor", index === 0 ? "start" : "end");
+    label.setAttribute("class", "trading-chart-axis-label");
+    label.textContent = series[index].label;
+    svg.appendChild(label);
+  });
+  wrap.appendChild(svg);
+  card.appendChild(wrap);
+  return card;
+}
+
 function renderTrading() {
   const root = byId("trading-content");
   root.replaceChildren();
@@ -752,6 +985,7 @@ function renderTrading() {
     append(banner, el("div", "risk-bar"), copy);
     root.appendChild(banner);
   }
+  root.appendChild(renderTradingCashflowChart(trading));
   root.appendChild(renderTradingPerformance(trading, summary));
 }
 
