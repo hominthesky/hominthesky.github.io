@@ -1149,17 +1149,28 @@ input:focus {
 }
 
 .trading-breakdown-row {
+  position: relative;
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 13px 15px;
+  overflow: hidden;
+  padding: 13px 15px 13px 21px;
   border: 1px solid rgba(163, 184, 214, 0.15);
   border-radius: 12px;
   background: rgba(9, 23, 39, 0.72);
 }
 
-.trading-breakdown-row.win { border-left: 3px solid var(--green); }
-.trading-breakdown-row.loss { border-left: 3px solid var(--red); }
+.trading-breakdown-row::before,
+.position-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 6px;
+  border-radius: 0;
+}
+
+.trading-breakdown-row.win::before { background: var(--green); }
+.trading-breakdown-row.loss::before { background: var(--red); }
 
 .trading-breakdown-row > div,
 .trading-breakdown-result {
@@ -1171,15 +1182,22 @@ input:focus {
 .trading-breakdown-row span { color: var(--muted); font-size: 10px; }
 
 .position-row {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(100px, 0.7fr) minmax(120px, 0.8fr) minmax(320px, 3fr);
   align-items: start;
   gap: 18px;
-  padding: 17px 20px;
+  overflow: hidden;
+  padding: 17px 20px 17px 26px;
   border: 1px solid rgba(163, 184, 214, 0.17);
   border-radius: 14px;
   background: rgba(9, 23, 39, 0.94);
 }
+
+.position-row.tone-red::before { background: var(--red); }
+.position-row.tone-amber::before { background: var(--amber); }
+.position-row.tone-green::before { background: var(--green); }
+.position-row.tone-neutral::before { background: var(--cyan); }
 
 .position-identity,
 .position-exposure {
