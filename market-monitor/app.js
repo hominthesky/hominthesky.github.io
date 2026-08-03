@@ -1,10 +1,44 @@
 "use strict";
 
+import {
+  DEFAULT_MONTHLY_TARGET_CNY,
+  LIVE_POLL_INTERVAL_MS,
+  MAX_FUTURE_CLOCK_SKEW_MS,
+  MANUAL_REFRESH_TIMEOUT_MS,
+  assessLiveTradingSignal,
+  calculateDailyTarget,
+  deriveFxStatus,
+  liveFinancialFingerprint,
+  manualRefreshLabel,
+  refreshProofMessage,
+  resolvePendingManualRefresh,
+} from "./live_trading.mjs?v=20260804-1";
+
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
+let unlockKey = null;
+let livePollTimer = null;
+let livePollInFlight = null;
 let displayCurrency = localStorage.getItem("zzao-monitor-currency") || "USD";
 let activeView = localStorage.getItem("zzao-monitor-view") || "personal";
 let tradingChartCadence = localStorage.getItem("zzao-monitor-trading-chart") || "day";
+
+const metaContent = (name) =>
+  document.querySelector(`meta[name="${name}"]`)?.content?.trim() || "";
+const LIVE_CLIENT = Object.freeze({
+  payloadUrl: metaContent("zzao-live-payload-url"),
+  challengeUrl: metaContent("zzao-live-challenge-url"),
+  refreshUrl: metaContent("zzao-live-refresh-url"),
+});
+const liveRuntime = {
+  transportStatus: LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING",
+  pollState: LIVE_CLIENT.payloadUrl ? "idle" : "disabled",
+  refreshState: LIVE_CLIENT.refreshUrl ? "idle" : "disabled",
+  error: "",
+  nextCheckAt: null,
+  cooldownUntil: 0,
+  pendingRefresh: null,
+};
 
 const VIEW_META = {
   personal: {
@@ -161,21 +195,32 @@ function term(label, definition, className = "") {
 }
 
 function b64bytes(value) {
-  const binary = atob(value);
+  const normalized = String(value || "").replaceAll("-", "+").replaceAll("_", "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  const binary = atob(padded);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
-async function decryptPayload(password) {
-  const response = await fetch(payloadUrl, { cache: "no-store" });
-  if (!response.ok) throw new Error("加密数据未能读取，请稍后重试。");
-  const envelope = await response.json();
-  const passwordKey = await crypto.subtle.importKey(
+function bytesB64Url(value) {
+  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
+async function importUnlockKey(password) {
+  return crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(password),
     "PBKDF2",
     false,
     ["deriveKey"],
   );
+}
+
+async function decryptEnvelope(envelope, passwordKey) {
   const key = await crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
@@ -198,6 +243,21 @@ async function decryptPayload(password) {
     b64bytes(envelope.ciphertext),
   );
   return JSON.parse(new TextDecoder().decode(plaintext));
+}
+
+async function fetchEncryptedPayload(url, passwordKey) {
+  const response = await fetch(url, {
+    cache: "no-store",
+    credentials: "omit",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error("加密数据未能读取，请稍后重试。");
+  return decryptEnvelope(await response.json(), passwordKey);
+}
+
+async function decryptPayload(password) {
+  const key = await importUnlockKey(password);
+  return { data: await fetchEncryptedPayload(payloadUrl, key), key };
 }
 
 function pct(value, digits = 1) {
@@ -229,6 +289,327 @@ function usd(value, compact = false) {
     maximumFractionDigits: compact === true ? 1 : 2,
     notation: compact === true ? "compact" : "standard",
   }).format(amount);
+}
+
+function cny(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  return new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency: "CNY",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(value));
+}
+
+function usdExact(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(value));
+}
+
+function readPositiveLocalNumber(key) {
+  const value = Number(localStorage.getItem(key));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function liveTarget(trading) {
+  const live = trading.live || null;
+  const localMonthlyTarget = readPositiveLocalNumber("zzao-monitor-monthly-target-cny");
+  const monthlyTargetCny =
+    localMonthlyTarget ??
+    live?.target?.monthly_target_cny ??
+    trading.plan?.monthly_target_cny ??
+    DEFAULT_MONTHLY_TARGET_CNY;
+  return calculateDailyTarget({
+    monthlyTargetCny,
+    scheduledSessionsInMonth:
+      live?.calendar?.scheduled_sessions_in_month ?? live?.scheduled_sessions_in_month,
+    targetStatus: Number(monthlyTargetCny) > 0 ? "OK" : live?.target?.status,
+    calendarStatus: live?.calendar?.status ?? live?.calendar_status,
+    usdCnyRate: monitorData?.meta?.usd_cny_rate,
+    fxStatus: deriveFxStatus({
+      explicitStatus: monitorData?.meta?.usd_cny_status,
+      rate: monitorData?.meta?.usd_cny_rate,
+      asOfDate: monitorData?.meta?.usd_cny_as_of,
+      referenceDate: live?.monitoring_day || easternCalendarDate(),
+    }),
+  });
+}
+
+function easternCalendarDate(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function liveSignal(trading) {
+  return assessLiveTradingSignal({
+    live: trading.live,
+    target: liveTarget(trading),
+    portfolioGate: portfolioGateInput(),
+    maximumLossCny: readPositiveLocalNumber("zzao-monitor-maximum-loss-cny"),
+    transportStatus: liveRuntime.transportStatus,
+  });
+}
+
+function portfolioGateInput() {
+  const summary = monitorData?.personal?.summary || {};
+  const value = String(summary.portfolio_gate || "").toUpperCase();
+  const retrievedAt = monitorData?.meta?.portfolio_retrieved_at;
+  const retrievedAtMs = Date.parse(retrievedAt || "");
+  const futureTimestamp =
+    Number.isFinite(retrievedAtMs) && retrievedAtMs > Date.now() + MAX_FUTURE_CLOCK_SKEW_MS;
+  const ageHours = Number.isFinite(retrievedAtMs) && !futureTimestamp
+    ? Math.max(0, Date.now() - retrievedAtMs) / 3_600_000
+    : null;
+  const explicitlyStale = String(summary.source_status || "").toUpperCase() === "STALE";
+  let gateStatus = "MISSING";
+  if (["RED", "CLEAR"].includes(value) && ageHours !== null) {
+    if (explicitlyStale || ageHours > 30) gateStatus = "STALE";
+    else if (value === "RED" || summary.implementation_readiness === "CONDITIONAL") {
+      gateStatus = "OK";
+    } else {
+      gateStatus = "PARTIAL";
+    }
+  }
+  return { value, status: gateStatus, as_of: retrievedAt || null };
+}
+
+function liveTime(value) {
+  const parsed = typeof value === "number" ? value : Date.parse(value || "");
+  if (!Number.isFinite(parsed)) return "—";
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "America/New_York",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZoneName: "short",
+  }).format(new Date(parsed));
+}
+
+function liveAge(ageMs) {
+  if (ageMs === null || ageMs === undefined || !Number.isFinite(Number(ageMs))) return "未知";
+  const seconds = Math.max(0, Math.floor(Number(ageMs) / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+}
+
+function renderLiveOnly() {
+  if (!monitorData || byId("dashboard").hidden) return;
+  const region = byId("trading-live-region");
+  if (!region) return;
+  region.replaceChildren(renderLiveTrading(monitorData.trading || {}));
+}
+
+function mergeLivePayload(payload) {
+  const incomingTrading = payload?.trading;
+  const incomingLive = incomingTrading?.live;
+  if (!incomingLive || typeof incomingLive !== "object") {
+    throw new Error("实时数据格式不完整，已保留上次成功数据。");
+  }
+  const normalizedLive = {
+    ...incomingLive,
+    checked_at: incomingLive.checked_at || incomingTrading.meta?.checked_at,
+    sources: Array.isArray(incomingLive.sources)
+      ? incomingLive.sources
+      : Array.isArray(incomingTrading.sources)
+        ? incomingTrading.sources
+        : [],
+  };
+  const incomingCheckedAt = Date.parse(normalizedLive.checked_at || "");
+  if (!Number.isFinite(incomingCheckedAt)) {
+    throw new Error("实时数据缺少有效检查时间，已保留上次成功数据。");
+  }
+  const previousCheckedAt = Date.parse(monitorData.trading?.live?.checked_at || "");
+  if (Number.isFinite(previousCheckedAt) && incomingCheckedAt < previousCheckedAt) {
+    throw new Error("实时数据版本早于当前页面，已保留较新的数据。");
+  }
+
+  const previousLive = monitorData.trading?.live;
+  const heartbeatAdvanced =
+    incomingCheckedAt > (Number.isFinite(previousCheckedAt) ? previousCheckedAt : 0);
+  const financialChanged =
+    liveFinancialFingerprint(normalizedLive) !== liveFinancialFingerprint(previousLive);
+  monitorData.trading = {
+    ...monitorData.trading,
+    live: normalizedLive,
+    plan:
+      incomingTrading.plan && typeof incomingTrading.plan === "object"
+        ? incomingTrading.plan
+        : monitorData.trading?.plan,
+  };
+  return { heartbeatAdvanced, financialChanged };
+}
+
+async function checkLivePayload() {
+  if (!LIVE_CLIENT.payloadUrl || !unlockKey || !monitorData) return false;
+  if (livePollInFlight) return livePollInFlight;
+  const sessionKey = unlockKey;
+  liveRuntime.pollState = "checking";
+  liveRuntime.error = "";
+  renderLiveOnly();
+  livePollInFlight = (async () => {
+    try {
+      const payload = await fetchEncryptedPayload(LIVE_CLIENT.payloadUrl, sessionKey);
+      if (unlockKey !== sessionKey || !monitorData) {
+        return { heartbeatAdvanced: false, financialChanged: false, cancelled: true };
+      }
+      const outcome = mergeLivePayload(payload);
+      liveRuntime.transportStatus = "OK";
+      liveRuntime.pollState = "idle";
+      const completion = resolvePendingManualRefresh(
+        liveRuntime.pendingRefresh,
+        monitorData.trading?.live,
+      );
+      if (completion) {
+        liveRuntime.refreshState = completion.state;
+        liveRuntime.pendingRefresh = null;
+      }
+      return outcome;
+    } catch (error) {
+      liveRuntime.transportStatus = "FAILED";
+      liveRuntime.pollState = "failed";
+      liveRuntime.error = error instanceof Error ? error.message : "实时通道检查失败。";
+      return { heartbeatAdvanced: false, financialChanged: false, failed: true };
+    } finally {
+      livePollInFlight = null;
+      renderLiveOnly();
+    }
+  })();
+  return livePollInFlight;
+}
+
+function stopLivePolling() {
+  if (livePollTimer) window.clearTimeout(livePollTimer);
+  livePollTimer = null;
+  liveRuntime.nextCheckAt = null;
+}
+
+function scheduleLivePolling(delayMs = LIVE_POLL_INTERVAL_MS) {
+  stopLivePolling();
+  if (!LIVE_CLIENT.payloadUrl || !unlockKey || document.hidden) return;
+  liveRuntime.nextCheckAt = Date.now() + delayMs;
+  renderLiveOnly();
+  livePollTimer = window.setTimeout(async () => {
+    livePollTimer = null;
+    await checkLivePayload();
+    scheduleLivePolling();
+  }, delayMs);
+}
+
+async function deriveRefreshProof(challenge, requestPath) {
+  if (!unlockKey) throw new Error("页面已锁定，请重新解锁。");
+  const salt = b64bytes(challenge.salt);
+  const iterations = Number(challenge.iterations);
+  if (!salt.length || !Number.isInteger(iterations) || iterations < 100_000) {
+    throw new Error("刷新 challenge 参数无效。");
+  }
+  const proofKey = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations },
+    unlockKey,
+    { name: "HMAC", hash: "SHA-256", length: 256 },
+    false,
+    ["sign"],
+  );
+  const message = refreshProofMessage(challenge, requestPath);
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    proofKey,
+    new TextEncoder().encode(message),
+  );
+  return bytesB64Url(signature);
+}
+
+async function requestManualRefresh() {
+  if (!LIVE_CLIENT.challengeUrl || !LIVE_CLIENT.refreshUrl || !unlockKey) return;
+  if (Date.now() < liveRuntime.cooldownUntil) {
+    renderLiveOnly();
+    return;
+  }
+  stopLivePolling();
+  liveRuntime.refreshState = "requesting";
+  liveRuntime.error = "";
+  renderLiveOnly();
+  const previousCheckedAt = monitorData.trading?.live?.checked_at || null;
+  try {
+    const challengeResponse = await fetch(LIVE_CLIENT.challengeUrl, {
+      cache: "no-store",
+      credentials: "omit",
+      headers: { Accept: "application/json" },
+    });
+    if (!challengeResponse.ok) throw new Error("无法取得单次刷新凭证。");
+    const challenge = await challengeResponse.json();
+    const refreshPath = new URL(LIVE_CLIENT.refreshUrl, window.location.href).pathname;
+    const proof = await deriveRefreshProof(challenge, refreshPath);
+    const refreshResponse = await fetch(LIVE_CLIENT.refreshUrl, {
+      method: "POST",
+      credentials: "omit",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        nonce: challenge.nonce,
+        expires_at: challenge.expires_at,
+        proof,
+      }),
+    });
+    const result = await refreshResponse.json().catch(() => ({}));
+    if (refreshResponse.status === 429) {
+      const cooldownSeconds = Math.max(1, Number(result.retry_after_seconds) || 60);
+      liveRuntime.cooldownUntil = Date.now() + cooldownSeconds * 1000;
+      liveRuntime.refreshState = "cooldown";
+      liveRuntime.pendingRefresh = null;
+      return;
+    }
+    if (refreshResponse.status !== 202) throw new Error(result.message || "刷新请求未被接受。");
+    liveRuntime.pendingRefresh = {
+      checkedAt: previousCheckedAt,
+      financialFingerprint: liveFinancialFingerprint(monitorData.trading?.live),
+    };
+    liveRuntime.refreshState = result.status === "merged" ? "checking" : "accepted";
+    renderLiveOnly();
+
+    const deadline = Date.now() + MANUAL_REFRESH_TIMEOUT_MS;
+    let completed = false;
+    let financialChanged = false;
+    while (Date.now() < deadline && unlockKey) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+      if (!unlockKey || !monitorData) return;
+      liveRuntime.refreshState = "checking";
+      const outcome = await checkLivePayload();
+      const nextCheckedAt = monitorData.trading?.live?.checked_at || null;
+      if (outcome?.heartbeatAdvanced && nextCheckedAt !== previousCheckedAt) {
+        completed = true;
+        financialChanged = outcome.financialChanged;
+        break;
+      }
+    }
+    liveRuntime.refreshState = completed
+      ? financialChanged
+        ? "updated"
+        : "current"
+      : "timeout";
+    if (completed) liveRuntime.pendingRefresh = null;
+    liveRuntime.cooldownUntil = Math.max(liveRuntime.cooldownUntil, Date.now() + 60_000);
+  } catch (error) {
+    liveRuntime.refreshState = "failed";
+    liveRuntime.pendingRefresh = null;
+    liveRuntime.error = error instanceof Error ? error.message : "主动刷新失败。";
+  } finally {
+    renderLiveOnly();
+    scheduleLivePolling();
+  }
 }
 
 function riskClass(value) {
@@ -1137,6 +1518,174 @@ function renderTradingCashflowChart(trading) {
   return card;
 }
 
+function liveSourceRows(live) {
+  const list = el("div", "live-source-list");
+  const sources = Array.isArray(live?.sources) ? live.sources : [];
+  if (!sources.length) {
+    list.appendChild(el("div", "live-source-row missing", "券商来源状态缺失"));
+    return list;
+  }
+  sources.forEach((source) => {
+    const sourceStatus = String(source.status || "MISSING").toUpperCase();
+    const row = el("div", `live-source-row ${sourceStatus === "OK" ? "ok" : "warning"}`);
+    append(
+      row,
+      el("strong", "", source.broker || source.source || "未知来源"),
+      el("span", "", sourceStatus),
+      el("small", "", source.notes || "只读成交与可取得费用"),
+    );
+    list.appendChild(row);
+  });
+  return list;
+}
+
+function livePreferenceField({ id, label, value, placeholder, storageKey, suffix }) {
+  const field = el("label", "live-preference-field");
+  const labelNode = el("span", "", label);
+  const control = el("div", "live-preference-control");
+  const input = el("input", "");
+  input.id = id;
+  input.type = "number";
+  input.min = "0";
+  input.step = "100";
+  input.inputMode = "decimal";
+  input.value = value ?? "";
+  input.placeholder = placeholder;
+  input.addEventListener("change", () => {
+    const numeric = Number(input.value);
+    if (Number.isFinite(numeric) && numeric > 0) localStorage.setItem(storageKey, String(numeric));
+    else localStorage.removeItem(storageKey);
+    renderTrading();
+  });
+  append(control, input, el("span", "", suffix));
+  append(field, labelNode, control);
+  return field;
+}
+
+function renderLiveTrading(trading) {
+  const live = trading.live || null;
+  const target = liveTarget(trading);
+  const signal = liveSignal(trading);
+  const card = el("section", `live-trading-card tone-${signal.tone}`);
+  const head = el("div", "live-trading-head");
+  const heading = el("div");
+  append(
+    heading,
+    el("p", "eyebrow", "LIVE · PROVISIONAL"),
+    el("h2", "", `${live?.monitoring_day || "本日"} 已实现交易收益`),
+    el("p", "live-trading-window", live?.window_label || "美东 [T-1 20:00, T 20:00)"),
+  );
+  const refresh = el(
+    "button",
+    "live-refresh-button",
+    manualRefreshLabel(
+      Date.now() < liveRuntime.cooldownUntil ? "cooldown" : liveRuntime.refreshState,
+      (liveRuntime.cooldownUntil - Date.now()) / 1000,
+    ),
+  );
+  refresh.type = "button";
+  refresh.disabled =
+    !LIVE_CLIENT.challengeUrl ||
+    !LIVE_CLIENT.refreshUrl ||
+    live?.data_status === "NO_ACTIVE_SESSION" ||
+    ["requesting", "accepted", "checking"].includes(liveRuntime.refreshState) ||
+    Date.now() < liveRuntime.cooldownUntil;
+  refresh.addEventListener("click", requestManualRefresh);
+  append(head, heading, refresh);
+
+  const primary = el("div", "live-primary");
+  const primaryValue = el(
+    "strong",
+    Number(live?.active_net_pnl) < 0 ? "negative" : Number(live?.active_net_pnl) > 0 ? "positive" : "",
+    usd(live?.active_net_pnl),
+  );
+  const primaryCopy = el("div");
+  append(
+    primaryCopy,
+    term("当日已实现净收益", TERM_DEFINITIONS.netTradingPnl, "live-primary-label"),
+    el("span", "", "已完成股票日内与期权周期 · 已扣可取得手续费"),
+  );
+  append(primary, primaryCopy, primaryValue);
+
+  const details = el("div", "live-detail-grid");
+  [
+    ["股票日内净入账", live?.intraday?.net_pnl, `${live?.intraday?.closed_trades ?? "—"} 个完成周期`],
+    ["期权净入账", live?.options?.net_pnl, `${live?.options?.closed_trades ?? "—"} 个完成周期`],
+    ["可取得手续费", live?.fees === null || live?.fees === undefined ? null : -Math.abs(Number(live.fees)), "已包含在当日净收益"],
+  ].forEach(([label, value, note]) => {
+    const item = el("div", "live-detail-item");
+    append(
+      item,
+      el("span", "", label),
+      el("strong", Number(value) < 0 ? "negative" : Number(value) > 0 ? "positive" : "", usd(value)),
+      el("small", "", note),
+    );
+    details.appendChild(item);
+  });
+
+  const signalBlock = el("div", `live-signal tone-${signal.tone}`);
+  append(
+    signalBlock,
+    el("strong", "", signal.headline),
+    el("p", "", signal.message),
+  );
+
+  const facts = el("div", "live-fact-grid");
+  const factRows = [
+    ["券商检查时间", liveTime(live?.checked_at)],
+    ["数据年龄", liveAge(signal.ageMs)],
+    ["下次页面检查", liveRuntime.nextCheckAt ? liveTime(liveRuntime.nextCheckAt) : "页面可见时每 60 秒"],
+    ["开放风险", live?.open_exposure_status === "KNOWN" ? "已取得" : "未知 · 不含未实现盈亏和挂单"],
+  ];
+  factRows.forEach(([label, value]) => {
+    const row = el("div", "live-fact-row");
+    append(row, el("span", "", label), el("strong", "", value));
+    facts.appendChild(row);
+  });
+
+  const targetPanel = el("div", "live-target-panel");
+  const targetHead = el("div", "live-target-head");
+  append(
+    targetHead,
+    el("strong", "", "当日盈利目标"),
+    el("span", "", target.status === "OK" ? "可比较" : "数据不足，暂停达标判断"),
+  );
+  const formula = el("p", "live-target-formula");
+  formula.textContent = target.scheduledSessionsInMonth
+    ? `${cny(target.monthlyTargetCny)} ÷ ${target.scheduledSessionsInMonth} 个 NYSE 计划交易日 = ${cny(target.dailyTargetCny)} / 日${target.dailyTargetUsd !== null ? `（${usdExact(target.dailyTargetUsd)}）` : ""}`
+    : `${cny(target.monthlyTargetCny)} ÷ NYSE 计划交易日数待确认`;
+  const targetNote = el("p", "live-target-note", target.reason);
+  const preferences = el("div", "live-preferences");
+  append(
+    preferences,
+    livePreferenceField({
+      id: "monthly-target-cny",
+      label: "月度目标",
+      value: readPositiveLocalNumber("zzao-monitor-monthly-target-cny") ?? target.monthlyTargetCny,
+      placeholder: "40000",
+      storageKey: "zzao-monitor-monthly-target-cny",
+      suffix: "CNY",
+    }),
+    livePreferenceField({
+      id: "maximum-loss-cny",
+      label: "当日最大亏损（可选）",
+      value: readPositiveLocalNumber("zzao-monitor-maximum-loss-cny"),
+      placeholder: "未设置",
+      storageKey: "zzao-monitor-maximum-loss-cny",
+      suffix: "CNY",
+    }),
+  );
+  append(targetPanel, targetHead, formula, targetNote, preferences);
+
+  const statusLine = el("p", "live-transport-status");
+  const pollCopy = liveRuntime.pollState === "checking"
+    ? "正在检查服务器上的最新加密快照。"
+    : liveRuntime.error || "自动检查只更新进行中数据；历史结算结果保持不变。";
+  statusLine.textContent = pollCopy;
+  append(card, head, primary, details, signalBlock, facts, liveSourceRows(live), targetPanel, statusLine);
+  return card;
+}
+
 function renderTrading() {
   const root = byId("trading-content");
   root.replaceChildren();
@@ -1162,6 +1711,10 @@ function renderTrading() {
     );
   }
   root.appendChild(settlement);
+  const liveRegion = el("div", "trading-live-region");
+  liveRegion.id = "trading-live-region";
+  liveRegion.appendChild(renderLiveTrading(trading));
+  root.appendChild(liveRegion);
   const focus = periods.find((period) => period.cadence === "month") || periods[0];
   if (focus) {
     const tone = Number(focus.investable_cashflow) < 0 ? "" : "amber";
@@ -1581,11 +2134,14 @@ byId("unlock-form").addEventListener("submit", async (event) => {
   button.textContent = "正在解密…";
   error.textContent = "";
   try {
-    monitorData = await decryptPayload(passwordInput.value);
+    const unlocked = await decryptPayload(passwordInput.value);
+    monitorData = unlocked.data;
+    unlockKey = unlocked.key;
     passwordInput.value = "";
     renderDashboard();
     byId("unlock-view").hidden = true;
     byId("dashboard").hidden = false;
+    scheduleLivePolling(0);
     requestAnimationFrame(() => {
       byId("dashboard").scrollIntoView({ block: "start" });
     });
@@ -1638,8 +2194,27 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setDrawerOpen(false);
 });
 
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    stopLivePolling();
+    return;
+  }
+  if (unlockKey && monitorData) {
+    scheduleLivePolling(0);
+    renderLiveOnly();
+  }
+});
+
 byId("lock-button").addEventListener("click", () => {
+  stopLivePolling();
+  unlockKey = null;
   monitorData = null;
+  liveRuntime.transportStatus = LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING";
+  liveRuntime.pollState = LIVE_CLIENT.payloadUrl ? "idle" : "disabled";
+  liveRuntime.refreshState = LIVE_CLIENT.refreshUrl ? "idle" : "disabled";
+  liveRuntime.error = "";
+  liveRuntime.cooldownUntil = 0;
+  liveRuntime.pendingRefresh = null;
   byId("personal-content").replaceChildren();
   byId("macro-content").replaceChildren();
   byId("trading-content").replaceChildren();

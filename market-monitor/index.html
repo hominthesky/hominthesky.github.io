@@ -7,13 +7,16 @@
     <meta name="referrer" content="no-referrer" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://monitor-live.zzao.im; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
     />
+    <meta name="zzao-live-payload-url" content="https://monitor-live.zzao.im/v1/payload" />
+    <meta name="zzao-live-challenge-url" content="https://monitor-live.zzao.im/v1/challenge" />
+    <meta name="zzao-live-refresh-url" content="https://monitor-live.zzao.im/v1/refresh" />
     <title>市场杠杆与持仓风险监控</title>
     <link rel="icon" href="./favicon.ico?v=20260801-1" />
     <link rel="shortcut icon" href="./favicon.ico?v=20260801-1" />
-    <link rel="stylesheet" href="./styles.css?v=20260801-12" />
-    <script src="./app.js?v=20260801-11" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=20260804-1" />
+    <script type="module" src="./app.js?v=20260804-1"></script>
   </head>
   <body>
     <main id="unlock-view" class="unlock-view">
