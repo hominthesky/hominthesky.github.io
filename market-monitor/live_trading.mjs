@@ -2,12 +2,30 @@ export const LIVE_POLL_INTERVAL_MS = 60_000;
 export const LIVE_STALE_AFTER_MS = 10 * 60_000;
 export const MANUAL_REFRESH_TIMEOUT_MS = 30_000;
 export const DEFAULT_MONTHLY_TARGET_CNY = 40_000;
-export const PORTFOLIO_GATE_STALE_AFTER_MS = 30 * 60 * 60_000;
+export const PORTFOLIO_GATE_STALE_AFTER_MS = 10 * 60_000;
 export const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60_000;
 
 const HEALTHY = "OK";
 const EXPECTED_LIVE_BROKERS = new Set(["Futu", "Tiger"]);
 const PORTFOLIO_GATE_VALUES = new Set(["RED", "CLEAR"]);
+const RISK_SNAPSHOT_FIELDS = [
+  "portfolio_gate",
+  "implementation_readiness",
+  "derived_nav_usd",
+  "gross_market_value_usd",
+  "gross_leverage",
+  "gross_leverage_red",
+  "required_gross_reduction_usd_to_red",
+  "highest_leverage_account",
+  "highest_account_gross_leverage",
+  "maintenance_margin_available",
+  "source_retrieved_at",
+  "source_status",
+  "holdings_as_of",
+  "quality_flags",
+  "source_label",
+  "broker_coverage",
+];
 const SOURCE_FAILURE_STATES = new Set([
   "EXPECTED_LAG",
   "PARTIAL",
@@ -52,90 +70,148 @@ export function deriveFxStatus({ explicitStatus, rate, asOfDate, referenceDate }
   return calendarAgeDays > 7 ? "STALE" : HEALTHY;
 }
 
-/**
- * The exchange calendar remains an upstream fact. This function only divides a
- * configured monthly target by the authoritative number of NYSE sessions.
- */
+export function derivePortfolioGateInput(summary, retrievedAt, nowMs = Date.now()) {
+  const value = String(summary?.portfolio_gate || "").toUpperCase();
+  const sourceStatus = status(summary?.source_status);
+  const asOfMs = timestamp(retrievedAt);
+  if (!PORTFOLIO_GATE_VALUES.has(value) || asOfMs === null) {
+    return { value, status: "MISSING", as_of: retrievedAt || null };
+  }
+  if (asOfMs > Number(nowMs) + MAX_FUTURE_CLOCK_SKEW_MS) {
+    return { value, status: "MISSING", as_of: retrievedAt };
+  }
+  if (Number(nowMs) - asOfMs > PORTFOLIO_GATE_STALE_AFTER_MS) {
+    return { value, status: "STALE", as_of: retrievedAt };
+  }
+  const knownFreshRed = value === "RED" && ["OK", "PARTIAL"].includes(sourceStatus);
+  const completeClear =
+    value === "CLEAR" &&
+    sourceStatus === "OK" &&
+    summary?.implementation_readiness === "CONDITIONAL";
+  return {
+    value,
+    status: knownFreshRed || completeClear ? "OK" : sourceStatus,
+    as_of: retrievedAt,
+  };
+}
+
+export function replaceRiskGateSummary(incoming) {
+  return incoming && typeof incoming === "object" && !Array.isArray(incoming)
+    ? { ...incoming }
+    : {};
+}
+
+export function riskSnapshotFingerprint(summary) {
+  const source = summary && typeof summary === "object" ? summary : {};
+  return JSON.stringify(
+    RISK_SNAPSHOT_FIELDS.map((field) => [field, source[field] ?? null]),
+  );
+}
+
+export function applyLiveRiskGate(personal, incoming) {
+  const current = personal && typeof personal === "object" ? personal : {};
+  const nextSummary = replaceRiskGateSummary(incoming);
+  if (riskSnapshotFingerprint(current.summary) === riskSnapshotFingerprint(nextSummary)) {
+    return current;
+  }
+  return {
+    ...current,
+    summary: nextSummary,
+    alerts: [],
+    actions: [],
+    positions: [],
+    strategy: [],
+    live_risk_gate_only: true,
+  };
+}
+
+/** Build a start-of-session target from the settled monthly gap. */
 export function calculateDailyTarget({
   monthlyTargetCny,
   scheduledSessionsInMonth,
+  remainingSessionsInMonth,
+  settledMtdActiveNetPnlUsd,
+  settledThrough,
   targetStatus = "OK",
   calendarStatus,
   usdCnyRate,
   fxStatus,
 }) {
   const monthly = finiteNumber(monthlyTargetCny);
-  const sessions = finiteNumber(scheduledSessionsInMonth);
+  const scheduledSessions = finiteNumber(scheduledSessionsInMonth);
+  const remainingSessions = finiteNumber(
+    remainingSessionsInMonth ?? scheduledSessionsInMonth,
+  );
+  const settledMtdUsd = finiteNumber(settledMtdActiveNetPnlUsd);
   const rate = finiteNumber(usdCnyRate);
   const calendarHealth = status(calendarStatus);
   const targetHealth = status(targetStatus);
   const fxHealth = status(fxStatus);
+  const base = {
+    monthlyTargetCny: monthly,
+    scheduledSessionsInMonth: scheduledSessions,
+    remainingSessionsInMonth: remainingSessions,
+    settledMtdActiveNetPnlUsd: settledMtdUsd,
+    settledMtdActiveNetPnlCny: null,
+    remainingGapCny: null,
+    settledThrough,
+    dailyTargetCny: null,
+    dailyTargetUsd: null,
+    usdCnyRate: rate,
+    fxStatus: fxHealth,
+  };
 
   if (targetHealth !== HEALTHY) {
     return {
+      ...base,
       status: targetHealth,
       comparisonReady: false,
-      reason: "当日目标配置不可用，暂停判断是否达标。",
-      monthlyTargetCny: monthly,
-      scheduledSessionsInMonth: sessions,
-      dailyTargetCny: null,
-      dailyTargetUsd: null,
-      usdCnyRate: rate,
-      fxStatus: fxHealth,
+      reason: "当日目标配置或月内结算覆盖不可用，暂停判断是否达标。",
     };
   }
   if (monthly === null || monthly <= 0) {
     return {
+      ...base,
       status: "MISSING",
       comparisonReady: false,
       reason: "未设置有效的月度盈利目标。",
-      monthlyTargetCny: monthly,
-      scheduledSessionsInMonth: sessions,
-      dailyTargetCny: null,
-      dailyTargetUsd: null,
-      usdCnyRate: rate,
-      fxStatus: fxHealth,
     };
   }
-  if (calendarHealth !== HEALTHY || sessions === null || sessions <= 0 || !Number.isInteger(sessions)) {
+  if (
+    calendarHealth !== HEALTHY
+    || remainingSessions === null
+    || remainingSessions <= 0
+    || !Number.isInteger(remainingSessions)
+    || settledMtdUsd === null
+  ) {
     return {
+      ...base,
       status: calendarHealth === HEALTHY ? "MISSING" : calendarHealth,
       comparisonReady: false,
-      reason: "NYSE 计划交易日历不可用，暂停判断是否达标。",
-      monthlyTargetCny: monthly,
-      scheduledSessionsInMonth: sessions,
-      dailyTargetCny: null,
-      dailyTargetUsd: null,
-      usdCnyRate: rate,
-      fxStatus: fxHealth,
+      reason: "NYSE 计划交易日历或月内结算进度不可用，暂停判断是否达标。",
     };
   }
-
-  const dailyTargetCny = monthly / sessions;
   if (fxHealth !== HEALTHY || rate === null || rate <= 0) {
     return {
+      ...base,
       status: fxHealth === HEALTHY ? "MISSING" : fxHealth,
       comparisonReady: false,
       reason: "USD/CNY 汇率缺失或过期，暂停判断是否达标。",
-      monthlyTargetCny: monthly,
-      scheduledSessionsInMonth: sessions,
-      dailyTargetCny,
-      dailyTargetUsd: null,
-      usdCnyRate: rate,
-      fxStatus: fxHealth,
     };
   }
 
+  const settledMtdCny = settledMtdUsd * rate;
+  const remainingGapCny = Math.max(monthly - settledMtdCny, 0);
+  const dailyTargetCny = remainingGapCny / remainingSessions;
   return {
+    ...base,
     status: HEALTHY,
     comparisonReady: true,
-    reason: "目标按整月计划交易日平均分摊，不追补此前差额。",
-    monthlyTargetCny: monthly,
-    scheduledSessionsInMonth: sessions,
+    reason: "今日目标按月度剩余缺口与含今日的剩余交易日计算，盘中保持固定。",
+    settledMtdActiveNetPnlCny: settledMtdCny,
+    remainingGapCny,
     dailyTargetCny,
     dailyTargetUsd: dailyTargetCny / rate,
-    usdCnyRate: rate,
-    fxStatus: fxHealth,
   };
 }
 
@@ -252,6 +328,18 @@ export function assessLiveTradingSignal({
 
   if (!target?.comparisonReady) {
     return uncertain(target?.reason || "目标、汇率或交易日历不可用。", ageMs);
+  }
+
+  if (finiteNumber(target.remainingGapCny) === 0) {
+    return {
+      code: "TARGET_REACHED_STOP",
+      tone: "green",
+      headline: "本月已结算收益已达到月度目标",
+      message: "今日无需用新增交易追求目标；可以停止新增日内风险并保护已实现成果。",
+      deterministic: true,
+      ageMs,
+      pnlCny,
+    };
   }
 
   if (pnlCny >= target.dailyTargetCny) {

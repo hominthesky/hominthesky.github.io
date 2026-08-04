@@ -3,16 +3,17 @@
 import {
   DEFAULT_MONTHLY_TARGET_CNY,
   LIVE_POLL_INTERVAL_MS,
-  MAX_FUTURE_CLOCK_SKEW_MS,
   MANUAL_REFRESH_TIMEOUT_MS,
+  applyLiveRiskGate,
   assessLiveTradingSignal,
   calculateDailyTarget,
   deriveFxStatus,
+  derivePortfolioGateInput,
   liveFinancialFingerprint,
   manualRefreshLabel,
   refreshProofMessage,
   resolvePendingManualRefresh,
-} from "./live_trading.mjs?v=20260804-1";
+} from "./live_trading.mjs?v=20260804-4";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -277,6 +278,10 @@ function number(value, digits = 1) {
   });
 }
 
+function finiteMetric(value) {
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+}
+
 function usd(value, compact = false) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
   const fx = Number(monitorData?.meta?.usd_cny_rate);
@@ -328,7 +333,10 @@ function liveTarget(trading) {
     monthlyTargetCny,
     scheduledSessionsInMonth:
       live?.calendar?.scheduled_sessions_in_month ?? live?.scheduled_sessions_in_month,
-    targetStatus: Number(monthlyTargetCny) > 0 ? "OK" : live?.target?.status,
+    remainingSessionsInMonth: live?.target?.remaining_sessions_in_month,
+    settledMtdActiveNetPnlUsd: live?.target?.settled_mtd_active_net_pnl_usd,
+    settledThrough: live?.target?.settled_through,
+    targetStatus: live?.target?.status ?? (Number(monthlyTargetCny) > 0 ? "OK" : "MISSING"),
     calendarStatus: live?.calendar?.status ?? live?.calendar_status,
     usdCnyRate: monitorData?.meta?.usd_cny_rate,
     fxStatus: deriveFxStatus({
@@ -363,25 +371,8 @@ function liveSignal(trading) {
 
 function portfolioGateInput() {
   const summary = monitorData?.personal?.summary || {};
-  const value = String(summary.portfolio_gate || "").toUpperCase();
   const retrievedAt = monitorData?.meta?.portfolio_retrieved_at;
-  const retrievedAtMs = Date.parse(retrievedAt || "");
-  const futureTimestamp =
-    Number.isFinite(retrievedAtMs) && retrievedAtMs > Date.now() + MAX_FUTURE_CLOCK_SKEW_MS;
-  const ageHours = Number.isFinite(retrievedAtMs) && !futureTimestamp
-    ? Math.max(0, Date.now() - retrievedAtMs) / 3_600_000
-    : null;
-  const explicitlyStale = String(summary.source_status || "").toUpperCase() === "STALE";
-  let gateStatus = "MISSING";
-  if (["RED", "CLEAR"].includes(value) && ageHours !== null) {
-    if (explicitlyStale || ageHours > 30) gateStatus = "STALE";
-    else if (value === "RED" || summary.implementation_readiness === "CONDITIONAL") {
-      gateStatus = "OK";
-    } else {
-      gateStatus = "PARTIAL";
-    }
-  }
-  return { value, status: gateStatus, as_of: retrievedAt || null };
+  return derivePortfolioGateInput(summary, retrievedAt);
 }
 
 function liveTime(value) {
@@ -411,6 +402,7 @@ function renderLiveOnly() {
   const region = byId("trading-live-region");
   if (!region) return;
   region.replaceChildren(renderLiveTrading(monitorData.trading || {}));
+  if (activeView === "personal") renderPersonal();
 }
 
 function mergeLivePayload(payload) {
@@ -450,6 +442,14 @@ function mergeLivePayload(payload) {
         ? incomingTrading.plan
         : monitorData.trading?.plan,
   };
+  const incomingRiskGate = payload?.personal?.risk_gate;
+  if (incomingRiskGate && typeof incomingRiskGate === "object") {
+    monitorData.personal = applyLiveRiskGate(monitorData.personal, incomingRiskGate);
+    monitorData.meta = {
+      ...monitorData.meta,
+      portfolio_retrieved_at: incomingRiskGate.source_retrieved_at || null,
+    };
+  }
   return { heartbeatAdvanced, financialChanged };
 }
 
@@ -645,23 +645,33 @@ function actionTone(label) {
 }
 
 function portfolioMetricGuidance(summary) {
-  const leverage = Number(summary.gross_leverage);
-  const leverageRed = Number(summary.gross_leverage_red);
-  const attackExposure = Number(summary.attack_exposure_pct_nav);
-  const attackTarget = Number(summary.attack_target_pct_nav);
+  const leverage = finiteMetric(summary.gross_leverage)
+    ? Number(summary.gross_leverage)
+    : null;
+  const leverageRed = finiteMetric(summary.gross_leverage_red)
+    ? Number(summary.gross_leverage_red)
+    : null;
+  const attackExposure = finiteMetric(summary.attack_exposure_pct_nav)
+    ? Number(summary.attack_exposure_pct_nav)
+    : null;
+  const attackTarget = finiteMetric(summary.attack_target_pct_nav)
+    ? Number(summary.attack_target_pct_nav)
+    : null;
   return {
     leverage: {
       definition: TERM_DEFINITIONS.grossLeverage,
       meaning: "↑ 回撤与保证金敏感度增加；↓ 强平安全垫改善。",
       action:
-        Number.isFinite(leverage) &&
-        Number.isFinite(leverageRed) &&
+        leverage !== null &&
+        leverageRed !== null &&
         leverage > leverageRed
           ? `高于 ${number(leverageRed, 2)}x 红线：停止新增杠杆，先降到红线以下。`
-          : "未越过红线：仍需按券商实时保证金维持安全垫。",
+          : leverage === null
+            ? "账户覆盖或关键字段不完整：当前不能计算组合毛杠杆，先以券商原生红灯阻断新增风险。"
+            : "未越过红线：仍需按券商实时保证金维持安全垫。",
       tone:
-        Number.isFinite(leverage) &&
-        Number.isFinite(leverageRed) &&
+        leverage !== null &&
+        leverageRed !== null &&
         leverage > leverageRed
           ? "tone-red"
           : "tone-neutral",
@@ -676,14 +686,16 @@ function portfolioMetricGuidance(summary) {
       definition: TERM_DEFINITIONS.attackExposure,
       meaning: "↑ 高波动与集中度风险增加；↓ 风险预算逐步恢复。",
       action:
-        Number.isFinite(attackExposure) &&
-        Number.isFinite(attackTarget) &&
+        attackExposure !== null &&
+        attackTarget !== null &&
         attackExposure > attackTarget
           ? `高于 ${pct(attackTarget)} 目标：优先复核大额高进攻敞口。`
-          : "处于目标内：按 thesis 与风险预算维护，不因短期价格单独加仓。",
+          : attackExposure === null || attackTarget === null
+            ? "策略分类或目标不可用：不据此判断敞口是否处于预算内。"
+            : "处于目标内：按 thesis 与风险预算维护，不因短期价格单独加仓。",
       tone:
-        Number.isFinite(attackExposure) &&
-        Number.isFinite(attackTarget) &&
+        attackExposure !== null &&
+        attackTarget !== null &&
         attackExposure > attackTarget
           ? "tone-red"
           : "tone-neutral",
@@ -908,18 +920,41 @@ function renderPersonal() {
   root.replaceChildren();
   const data = monitorData.personal;
   const summary = data.summary;
-  const personalAlert = data.alerts[0];
+  const personalAlert = (data.alerts || [])[0];
+  const sourceStatus = String(summary.source_status || "MISSING").toUpperCase();
+  const isRed = summary.portfolio_gate === "RED";
+  const sourceLabel = summary.source_label || "持仓风险快照";
+  const brokerNativeSource = String(sourceLabel).startsWith("Futu/Tiger");
+  const sourceIncomplete = sourceStatus !== "OK" && brokerNativeSource;
+  const sourceUncertain = sourceStatus !== "OK" && !isRed;
+  const liveGateOnly = data.live_risk_gate_only === true;
+  const coverage = Number(summary.broker_coverage);
+  const coverageText = Number.isFinite(coverage)
+    ? `，券商覆盖 ${(coverage * 100).toFixed(0)}%`
+    : "";
 
   const banner = el("section", `risk-banner ${summary.portfolio_gate === "RED" ? "" : "amber"}`);
   const bannerText = el("div");
   append(
     bannerText,
-    el("h2", "", personalAlert?.headline || "个人风险预算"),
+    el(
+      "h2",
+      "",
+      isRed
+        ? "组合红色闸门"
+        : sourceUncertain
+        ? "券商账户数据不确定"
+        : personalAlert?.headline || "个人风险预算",
+    ),
     el(
       "p",
       "",
-      personalAlert?.evidence ||
-        `当前组合毛杠杆 ${number(summary.gross_leverage, 2)}x，风险闸门 ${summary.portfolio_gate}。`,
+      isRed
+        ? `${sourceLabel}触发风险阻断（${summary.quality_flags || "红色风险证据"}）；来源状态 ${sourceStatus}${coverageText}。停止新增风险，券商原生来源不完整时不推导具体减仓标的或金额。`
+        : sourceUncertain
+        ? `${sourceLabel}来源状态为 ${sourceStatus}；先刷新来源数据再判断。`
+        : personalAlert?.evidence ||
+          `当前组合毛杠杆 ${number(summary.gross_leverage, 2)}x，风险闸门 ${summary.portfolio_gate}。`,
     ),
   );
   append(banner, el("div", "risk-bar"), bannerText);
@@ -927,46 +962,141 @@ function renderPersonal() {
 
   const metrics = el("section", "metric-grid");
   const guidance = portfolioMetricGuidance(summary);
-  append(
-    metrics,
+  const metricCards = [
     metricCard(
       "组合毛杠杆",
-      `${number(summary.gross_leverage, 2)}x`,
+      finiteMetric(summary.gross_leverage)
+        ? `${number(summary.gross_leverage, 2)}x`
+        : "—",
       `治理红线 ${number(summary.gross_leverage_red, 2)}x`,
       guidance.leverage,
     ),
-    metricCard(
+  ];
+  if (finiteMetric(summary.derived_nav_usd)) {
+    metricCards.unshift(
+      metricCard(
+        "券商账户净资产",
+        usd(summary.derived_nav_usd, true),
+        "Futu/Tiger net liquidation 合计",
+        {
+          definition: "两家券商本次快照返回的账户净清算值合计，不含未接入的银行、基金或其它券商资产。",
+          meaning: "它是组合毛杠杆的分母；下降会使同样的毛敞口对应更高杠杆。",
+          action: "与券商 App 的账户权益核对；来源不完整时不据此调整仓位。",
+          tone: "tone-neutral",
+        },
+      ),
+    );
+  }
+  if (finiteMetric(summary.gross_market_value_usd)) {
+    metricCards.push(
+      metricCard(
+        "绝对毛持仓价值",
+        usd(summary.gross_market_value_usd, true),
+        "多空绝对值合计，不做方向抵消",
+        {
+          definition: "券商账户股票与期权多空持仓价值的绝对值合计，用于观察总风险占用而非净方向。",
+          meaning: "↑ 总风险占用扩大；↓ 组合去杠杆，但不代表一定盈利或亏损。",
+          action: "结合净资产、保证金和逐标的集中度判断，不单独用该金额做买卖决定。",
+          tone: "tone-neutral",
+        },
+      ),
+    );
+  }
+  if (
+    finiteMetric(summary.required_gross_reduction_usd_to_red) &&
+    Number(summary.required_gross_reduction_usd_to_red) > 0
+  ) {
+    metricCards.push(metricCard(
       "回到红线需降毛敞口",
       usd(summary.required_gross_reduction_usd_to_red, true),
       "静态一阶估算，执行前须用券商实时数据重算",
       guidance.reduction,
-    ),
-    metricCard(
+    ));
+  }
+  if (finiteMetric(summary.attack_exposure_pct_nav)) {
+    metricCards.push(metricCard(
       "高进攻敞口 / NAV",
       pct(summary.attack_exposure_pct_nav),
       `目标 ${pct(summary.attack_target_pct_nav)}`,
       guidance.attack,
-    ),
-    metricCard(
+    ));
+  }
+  if (finiteMetric(summary.highest_account_gross_leverage)) {
+    metricCards.push(metricCard(
       "最高账户杠杆",
       `${number(summary.highest_account_gross_leverage, 2)}x`,
       `${summary.highest_leverage_account || "—"} · 先核对 house requirement`,
       guidance.account,
-    ),
-  );
+    ));
+  }
+  append(metrics, ...metricCards);
   root.appendChild(metrics);
 
   const actions = section("今天先做什么", "按个人风险预算排序；不是自动交易指令。");
-  actions.appendChild(renderActionList(data.actions));
+  const visibleActions = isRed
+    ? [
+        {
+          priority_rank: 1,
+          action_label: "停止新增杠杆",
+          entity_label: "组合整体",
+          fact: `${sourceLabel}触发 ${summary.quality_flags || "RED"}；来源状态 ${sourceStatus}${coverageText}。`,
+          inference: "盈利目标与旧机会信号不能覆盖当前组合风险。",
+          execution_condition: "先在券商 App 核对账户、保证金和开放仓位；只有完整新快照恢复 CLEAR 后再重新评估。",
+          action: "停止新增日内和期权风险；本实时聚合不提供具体减仓标的或手数。",
+        },
+      ]
+    : sourceUncertain
+      ? [
+        {
+          priority_rank: 1,
+          action_label: "先刷新券商数据",
+          entity_label: "Futu / Tiger",
+          fact: `账户风险来源状态为 ${sourceStatus}，无法确认当前组合闸门。`,
+          inference: "旧的持仓动作可能已过期，不应继续展示为当前建议。",
+          execution_condition: "两家券商来源均恢复为 OK，且账户快照不超过 10 分钟。",
+          action: "刷新券商账户净值、毛持仓与保证金信息；恢复前停止依据本页增加风险。",
+        },
+        ]
+      : liveGateOnly
+        ? [
+            {
+              priority_rank: 1,
+              action_label: "等待确认",
+              entity_label: "组合整体",
+              fact: "实时账户闸门为 CLEAR，但逐标的派生分析已因新快照而失效。",
+              inference: "旧快照生成的机会与持仓动作不再作为当前建议展示。",
+              execution_condition: "等待下一次完整页面计算，或只在券商 App 中按既定计划人工复核。",
+              action: "不依据旧逐标的动作新增风险；完整页面刷新后再评估。",
+            },
+          ]
+        : data.actions || [];
+  actions.appendChild(renderActionList(visibleActions));
   root.appendChild(actions);
 
   const positions = section("持仓风险与行动", "仅显示个人持仓事实和对应风险动作，不混入宏观板块列表。");
-  positions.appendChild(renderPositionRows(data.positions));
+  if (sourceIncomplete || liveGateOnly) {
+    positions.appendChild(
+      el(
+        "p",
+        "section-note",
+        isRed
+          ? "红色闸门的账户覆盖不完整或实时快照已变化；请在券商 App 核对开放仓位，本页不猜测具体减仓标的。"
+          : "账户快照已变化或不完整；暂不展示可能已经过期的逐标的动作。",
+      ),
+    );
+  } else {
+    positions.appendChild(renderPositionRows(data.positions || []));
+  }
   root.appendChild(positions);
 
-  const strategy = section("策略敞口与目标", "实际敞口按组合 NAV 重算。");
-  strategy.appendChild(
-    table(
+  const strategyRows = sourceIncomplete || liveGateOnly
+    ? []
+    : (data.strategy || []).filter(
+        (row) => Number.isFinite(Number(row.target_pct_nav)),
+      );
+  if (strategyRows.length) {
+    const strategy = section("策略敞口与目标", "实际敞口按组合 NAV 重算。");
+    strategy.appendChild(table(
       [
         { key: "strategy", label: "策略" },
         { key: "actual_pct_nav", label: "实际 / NAV", numeric: true, render: pct },
@@ -974,10 +1104,10 @@ function renderPersonal() {
         { key: "gap_pct_nav", label: "偏离", numeric: true, render: pct },
         { key: "actual_market_value_usd", label: "毛敞口", numeric: true, render: usd },
       ],
-      data.strategy,
-    ),
-  );
-  root.appendChild(strategy);
+      strategyRows,
+    ));
+    root.appendChild(strategy);
+  }
 }
 
 function cadenceLabel(value) {
@@ -1651,9 +1781,9 @@ function renderLiveTrading(trading) {
     el("span", "", target.status === "OK" ? "可比较" : "数据不足，暂停达标判断"),
   );
   const formula = el("p", "live-target-formula");
-  formula.textContent = target.scheduledSessionsInMonth
-    ? `${cny(target.monthlyTargetCny)} ÷ ${target.scheduledSessionsInMonth} 个 NYSE 计划交易日 = ${cny(target.dailyTargetCny)} / 日${target.dailyTargetUsd !== null ? `（${usdExact(target.dailyTargetUsd)}）` : ""}`
-    : `${cny(target.monthlyTargetCny)} ÷ NYSE 计划交易日数待确认`;
+  formula.textContent = target.remainingSessionsInMonth
+    ? `（${cny(target.monthlyTargetCny)} − 本月已结算 ${cny(target.settledMtdActiveNetPnlCny)}）÷ ${target.remainingSessionsInMonth} 个剩余 NYSE 交易日（含今日）= ${cny(target.dailyTargetCny)} / 日${target.dailyTargetUsd !== null ? `（${usdExact(target.dailyTargetUsd)}）` : ""}`
+    : `${cny(target.monthlyTargetCny)} − 本月已结算收益；剩余 NYSE 交易日数待确认`;
   const targetNote = el("p", "live-target-note", target.reason);
   const preferences = el("div", "live-preferences");
   append(
