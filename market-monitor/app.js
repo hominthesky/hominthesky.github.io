@@ -10,10 +10,15 @@ import {
   deriveFxStatus,
   derivePortfolioGateInput,
   liveFinancialFingerprint,
+  liveFinancialComplete,
+  isPeriodCoverageComplete,
   manualRefreshLabel,
   refreshProofMessage,
   resolvePendingManualRefresh,
-} from "./live_trading.mjs?v=20260804-4";
+  rowsWithinYearCoverage,
+  yearSeriesScope,
+  yearCoverageLabel,
+} from "./live_trading.mjs?v=20260805-1";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -97,7 +102,7 @@ const TERM_DEFINITIONS = {
   sourceCoverage:
     "本次运行中该公开数据源成功取得有效观察值的比例。下降表示证据缺口变大，不代表市场风险改善。",
   netTradingPnl:
-    "已完成交易周期的毛收益减去券商可取得费用。股票日内按同一美东监控日净头寸回到零统计，期权按同一合约净头寸回到零统计；未平仓浮盈亏不计入。",
+    "连续 FIFO 账本中，方向相反的成交实际减少已有成本批次时形成的毛收益，减去券商可取得费用。期初成本不明的 carried lot 平仓会被排除；未平仓浮盈亏不计入。",
   grossTradingPnl:
     "已完成交易周期在扣除券商可取得手续费之前的收益。它用于解释成本侵蚀，不代表最终可支配现金。",
   netAfterCosts:
@@ -1110,11 +1115,47 @@ function renderPersonal() {
   }
 }
 
-function cadenceLabel(value) {
-  return { day: "本日", week: "本周", month: "本月", year: "年内累计" }[value] || value;
+function cadenceLabel(value, period = null) {
+  if (value === "year") {
+    return yearCoverageLabel(period?.coverage_status);
+  }
+  return { day: "本日", week: "本周", month: "本月" }[value] || value;
 }
 
-function tradingAction(period, portfolioSummary) {
+function tradingSourcesComplete(trading) {
+  const expected = Array.isArray(trading.expected_brokers)
+    ? trading.expected_brokers
+    : ["Futu", "Tiger"];
+  const sources = Array.isArray(trading.sources) ? trading.sources : [];
+  const counts = new Map();
+  sources.forEach((source) => {
+    const broker = String(source?.broker || "");
+    counts.set(broker, (counts.get(broker) || 0) + 1);
+  });
+  const sourcesComplete =
+    expected.length > 0 &&
+    new Set(expected).size === expected.length &&
+    sources.length === expected.length &&
+    expected.every((broker) => {
+      const source = sources.find((row) => row?.broker === broker);
+      return counts.get(broker) === 1 &&
+        source?.status === "OK" &&
+        Number(source?.fee_coverage_ratio) >= 1;
+    });
+  return sourcesComplete;
+}
+
+function settledPeriodComplete(trading, period) {
+  return tradingSourcesComplete(trading) &&
+    period?.realized_coverage_status === "COMPLETE" &&
+    period?.passive_cashflow_coverage_status === "COMPLETE" &&
+    isPeriodCoverageComplete(period);
+}
+
+function tradingAction(period, portfolioSummary, coverageComplete = true) {
+  if (!coverageComplete) {
+    return "数据覆盖不完整：仅用于核对，不据此判断可分配现金、扩大仓位或结束当日交易。";
+  }
   const trades = Number(period.intraday_closed_trades || 0) + Number(period.option_closed_trades || 0);
   const pnl = Number(period.active_net_pnl || 0);
   const weak = [period.intraday_profit_factor, period.option_profit_factor]
@@ -1148,6 +1189,10 @@ function cashflowMetric(label, amount, definition, emphasis = false) {
     el("strong", `cashflow-metric-value ${valueClass}`.trim(), usd(amount)),
   );
   return item;
+}
+
+function negativeMetric(value) {
+  return finiteMetric(value) ? -Number(value) : null;
 }
 
 function cashflowGroup(title, subtitle, tone, metrics, footer) {
@@ -1206,22 +1251,48 @@ function renderTradingPerformance(trading, portfolioSummary) {
 
   const periodList = el("div", "trading-period-list");
   (trading.periods || []).forEach((period) => {
-    const row = el("article", `trading-period ${Number(period.active_net_pnl) < 0 ? "tone-red" : "tone-green"}`);
+    const realizedComplete = period?.realized_coverage_status === "COMPLETE";
+    const historyComplete = isPeriodCoverageComplete(period);
+    const coverageComplete = settledPeriodComplete(trading, period);
+    const periodTone = finiteMetric(period.active_net_pnl)
+      ? Number(period.active_net_pnl) < 0 ? "tone-red" : "tone-green"
+      : "";
+    const row = el("article", `trading-period ${periodTone}`.trim());
     const head = el("div", "trading-period-head");
     append(
       head,
-      el("strong", "", cadenceLabel(period.cadence)),
-      el("span", "", `${period.start_date} — ${period.end_date}`),
+      el("strong", "", cadenceLabel(period.cadence, period)),
+      el("span", "", `${period.start_date || "起点未知"} — ${period.end_date}`),
     );
     const primary = el(
       "div",
-      `trading-primary ${Number(period.investable_cashflow) < 0 ? "loss" : "win"}`,
+      `trading-primary ${
+        finiteMetric(period.investable_cashflow)
+          ? Number(period.investable_cashflow) < 0 ? "loss" : "win"
+          : ""
+      }`.trim(),
     );
     const primaryCopy = el("div");
     append(
       primaryCopy,
-      term("实收入账现金流", TERM_DEFINITIONS.realizedCashflow, "trading-primary-label"),
-      el("span", "trading-primary-formula", "已完成交易净收益 + 利息净额 + 税后股息"),
+      term(
+        coverageComplete ? "实收入账现金流" : "可确认现金流",
+        TERM_DEFINITIONS.realizedCashflow,
+        "trading-primary-label",
+      ),
+      el(
+        "span",
+        "trading-primary-formula",
+        coverageComplete
+          ? "已完成交易净收益 + 利息净额 + 税后股息"
+          : !realizedComplete
+            ? `已排除期初成本不明的 ${(period.excluded_instruments || []).join("、") || "未知标的"}`
+            : !historyComplete
+              ? `仅统计 ${period.start_date || "未知起点"} — ${period.end_date} 的可确认历史`
+            : period.passive_cashflow_coverage_status !== "COMPLETE"
+              ? "股息 / 利息流水未覆盖全部券商；被动现金流不可按零处理"
+              : "券商来源或费用覆盖不完整，仅供核对",
+      ),
     );
     append(
       primary,
@@ -1239,22 +1310,22 @@ function renderTradingPerformance(trading, portfolioSummary) {
       inputs,
       cashflowGroup(
         "股票日内",
-        `${period.intraday_closed_trades || 0} 个完成周期`,
+        `${number(period.intraday_closed_trades, 0)} 个完成周期`,
         "stock",
         [
           { label: "毛收益（未扣手续费）", value: period.intraday_gross_pnl, definition: TERM_DEFINITIONS.grossTradingPnl },
-          { label: "手续费成本", value: -Number(period.intraday_fees || 0), definition: "已分摊到股票日内完整周期的佣金及费用，以负数显示。" },
+          { label: "手续费成本", value: negativeMetric(period.intraday_fees), definition: "已分摊到股票日内完整周期的佣金及费用，以负数显示。" },
           { label: "扣费后净入账", value: period.intraday_net_pnl, definition: TERM_DEFINITIONS.netTradingPnl, primary: true },
         ],
         `胜率 ${pct(period.intraday_win_rate)} · 利润因子 ${number(period.intraday_profit_factor, 2)} · 现金流贡献 ${pct(period.intraday_cashflow_contribution)}`,
       ),
       cashflowGroup(
         "期权",
-        `${period.option_closed_trades || 0} 个完成周期`,
+        `${number(period.option_closed_trades, 0)} 个完成周期`,
         "option",
         [
           { label: "毛收益（未扣手续费）", value: period.option_gross_pnl, definition: TERM_DEFINITIONS.grossTradingPnl },
-          { label: "手续费成本", value: -Number(period.option_fees || 0), definition: "已分摊到期权完整持仓周期的佣金及费用，以负数显示。" },
+          { label: "手续费成本", value: negativeMetric(period.option_fees), definition: "已分摊到期权完整持仓周期的佣金及费用，以负数显示。" },
           { label: "扣费后净入账", value: period.option_net_pnl, definition: TERM_DEFINITIONS.netTradingPnl, primary: true },
         ],
         `胜率 ${pct(period.option_win_rate)} · 利润因子 ${number(period.option_profit_factor, 2)} · 现金流贡献 ${pct(period.option_cashflow_contribution)}`,
@@ -1279,13 +1350,28 @@ function renderTradingPerformance(trading, portfolioSummary) {
           { label: "融资 / 其他利息", value: period.interest_cashflow, definition: "券商已入账的 USD 融资或证券借贷利息净额；负值表示现金流成本。" },
           { label: "扣费息后交易净利润", value: period.net_pnl_after_fees_and_interest, definition: TERM_DEFINITIONS.netAfterCosts, primary: true },
         ],
-        `合计手续费 ${usd(-Number(period.fees || 0))} · 不含税后股息`,
+        `合计手续费 ${usd(negativeMetric(period.fees))} · 不含税后股息`,
       ),
     );
-    const scopeNote = period.cashflow_scope === "ACTIVE_TRADING_ONLY"
-      ? "当前尚未接入股息 / 利息流水，贡献度分母仅含股票日内与期权净收益。"
-      : `“交易净利润（扣费息）”不含股息；“已实现现金流”再加税后股息。贡献度分母包含 USD 日内、期权、税后股息和利息${period.excluded_non_usd_cashflow_records ? `；另有 ${period.excluded_non_usd_cashflow_records} 条非 USD 流水未换汇、已排除` : ""}。`;
-    const advice = el("p", "trading-advice", `${tradingAction(period, portfolioSummary)} ${scopeNote}`);
+    const scopeNote = period.cashflow_scope === "ACTIVE_PLUS_PASSIVE"
+      ? `“交易净利润（扣费息）”不含股息；“已实现现金流”再加税后股息。贡献度分母包含 USD 日内、期权、税后股息和利息${period.excluded_non_usd_cashflow_records ? `；另有 ${period.excluded_non_usd_cashflow_records} 条非 USD 流水未换汇、已排除` : ""}。`
+      : `${period.passive_cashflow_coverage_reason || "股息 / 利息流水覆盖不完整。"} 当前金额仅含可确认来源，不可作为可分配现金、追加交易或结束当日交易的依据。`;
+    const coverageNote = !realizedComplete
+      ? `Realized 配对仅部分覆盖：排除 ${period.excluded_instrument_count || 0} 个标的、${period.excluded_realization_count || 0} 笔无法可靠配对的平仓；不得把本卡金额视为账户全部已实现收益。`
+      : period.coverage_status === "PARTIAL"
+        ? "Realized 配对覆盖完整，但历史范围不完整；本卡金额只代表上述实际覆盖期。"
+        : period.coverage_status === "UNKNOWN"
+          ? "共同历史起点无法确认，未生成确定性累计金额。"
+            : period.passive_cashflow_coverage_status !== "COMPLETE"
+              ? "被动现金流覆盖不完整；本卡仅显示可确认来源金额。"
+              : coverageComplete
+            ? "Realized 与历史覆盖完整。"
+            : "券商来源或费用覆盖不完整，本卡仅用于核对。";
+    const advice = el(
+      "p",
+      "trading-advice",
+      `${period.coverage_reason || ""} ${coverageNote} ${tradingAction(period, portfolioSummary, coverageComplete)} ${scopeNote}`,
+    );
     append(row, head, primary, inputsHead, inputs, advice);
     periodList.appendChild(row);
   });
@@ -1318,7 +1404,8 @@ function renderTradingPerformance(trading, portfolioSummary) {
   return card;
 }
 
-function tradingChartSeries(rows, cadence) {
+function tradingChartSeries(rows, cadence, yearPeriod = null, yearComplete = false, sourcesComplete = false) {
+  if (cadence === "year" && yearPeriod?.coverage_status === "UNKNOWN") return [];
   const components = [
     "intraday_net_pnl",
     "option_net_pnl",
@@ -1328,11 +1415,18 @@ function tradingChartSeries(rows, cadence) {
   ];
   const normalized = (row, labels = {}) => ({
     ...labels,
-    value: Number(row.investable_cashflow || 0),
-    ...Object.fromEntries(components.map((key) => [key, Number(row[key] || 0)])),
+    value: finiteMetric(row.investable_cashflow) ? Number(row.investable_cashflow) : null,
+    ...Object.fromEntries(components.map((key) => [key, finiteMetric(row[key]) ? Number(row[key]) : null])),
+    coverageComplete: Boolean(
+      sourcesComplete &&
+      row.realized_coverage_status === "COMPLETE" &&
+      row.passive_cashflow_coverage_status === "COMPLETE" &&
+      (cadence === "year" ? yearComplete : true),
+    ),
   });
-  const ordered = [...(rows || [])]
-    .filter((row) => row.date && Number.isFinite(Number(row.investable_cashflow)))
+  const scopedRows = cadence === "year" ? rowsWithinYearCoverage(rows, yearPeriod) : [...(rows || [])];
+  const ordered = scopedRows
+    .filter((row) => row.date && finiteMetric(row.investable_cashflow))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   if (cadence === "day") {
     return ordered.slice(-30).map((row) =>
@@ -1353,19 +1447,34 @@ function tradingChartSeries(rows, cadence) {
     const group = groups.get(key) || {
       investable_cashflow: 0,
       ...Object.fromEntries(components.map((component) => [component, 0])),
+      coverageComplete: true,
+      componentsKnown: true,
     };
-    group.investable_cashflow += Number(row.investable_cashflow || 0);
+    group.investable_cashflow += finiteMetric(row.investable_cashflow)
+      ? Number(row.investable_cashflow)
+      : 0;
     components.forEach((component) => {
-      group[component] += Number(row[component] || 0);
+      if (finiteMetric(row[component])) group[component] += Number(row[component]);
+      else group.componentsKnown = false;
     });
+    group.coverageComplete = group.coverageComplete &&
+      row.realized_coverage_status === "COMPLETE" &&
+      row.passive_cashflow_coverage_status === "COMPLETE";
     groups.set(key, group);
   });
-  let series = [...groups.entries()].map(([key, row]) =>
-    normalized(row, {
+  let series = [...groups.entries()].map(([key, row]) => {
+    const normalizedRow = normalized(row, {
       label: cadence === "week" ? key.slice(5) : key,
       fullLabel: cadence === "week" ? `周起始 ${key}` : key,
-    }),
-  );
+    });
+    return {
+      ...normalizedRow,
+      coverageComplete: Boolean(
+        sourcesComplete && row.coverageComplete && row.componentsKnown &&
+        (cadence === "year" ? yearComplete : true),
+      ),
+    };
+  });
   if (cadence === "week") return series.slice(-16);
   if (cadence === "month") return series.slice(-12);
   const latestYear = series.at(-1)?.label.slice(0, 4);
@@ -1376,18 +1485,33 @@ function tradingChartSeries(rows, cadence) {
   };
   return series.map((row) => {
     Object.keys(cumulative).forEach((key) => {
-      cumulative[key] += Number(row[key] || 0);
+      if (key === "value") cumulative[key] += Number(row[key]);
+      else if (finiteMetric(cumulative[key]) && finiteMetric(row[key])) {
+        cumulative[key] += Number(row[key]);
+      } else {
+        cumulative[key] = null;
+      }
     });
-    return { ...row, ...cumulative, fullLabel: `${row.fullLabel} 年内累计` };
+    const scope = yearSeriesScope(yearPeriod, yearComplete);
+    return { ...row, ...cumulative, fullLabel: `${row.fullLabel} ${scope}` };
   });
 }
 
 function renderTradingCashflowChart(trading) {
+  const yearPeriod = (trading.periods || []).find((period) => period.cadence === "year");
+  const yearComplete = Boolean(yearPeriod && settledPeriodComplete(trading, yearPeriod));
+  const yearScope = yearSeriesScope(yearPeriod, yearComplete);
   const descriptions = {
-    day: "最近30个有记录的美东监控日",
-    week: "最近16周，每周实收入账现金流",
-    month: "最近12个月，每月实收入账现金流",
-    year: "本年度按月累计实收入账现金流",
+    day: "最近30个有记录的美东监控日；覆盖不完整时仅显示可确认金额。",
+    week: "最近16周；只有来源、费用、已实现配对与被动现金流覆盖完整时才称为实收入账现金流。",
+    month: "最近12个月；只有来源、费用、已实现配对与被动现金流覆盖完整时才称为实收入账现金流。",
+    year: yearPeriod?.coverage_status === "PARTIAL"
+      ? yearPeriod.coverage_reason
+      : yearPeriod?.coverage_status === "UNKNOWN"
+        ? "共同历史覆盖起点未知，不生成确定性年内累计。"
+        : yearComplete
+          ? "本年度按月累计实收入账现金流"
+          : "自然年历史存在，但 realized、券商来源或费用覆盖不完整；以下仅为年内可确认金额。",
   };
   const card = section("实收入账现金流趋势", descriptions[tradingChartCadence]);
   const controls = el("div", "chart-cadence-control");
@@ -1406,9 +1530,21 @@ function renderTradingCashflowChart(trading) {
   );
   card.querySelector(".section-head").appendChild(controls);
 
-  const series = tradingChartSeries(trading.daily, tradingChartCadence);
+  const series = tradingChartSeries(
+    trading.daily,
+    tradingChartCadence,
+    yearPeriod,
+    yearComplete,
+    tradingSourcesComplete(trading),
+  );
   if (!series.length) {
-    card.appendChild(el("p", "trading-chart-empty", "当前时间范围没有可绘制的已入账数据。"));
+    card.appendChild(el(
+      "p",
+      "trading-chart-empty",
+      tradingChartCadence === "year" && yearPeriod?.coverage_status === "UNKNOWN"
+        ? "共同历史覆盖起点无法确认，未绘制年内累计。"
+        : "当前时间范围没有可绘制的已入账数据。",
+    ));
     return card;
   }
 
@@ -1453,6 +1589,8 @@ function renderTradingCashflowChart(trading) {
   if (previousTooltip) previousTooltip.remove();
   const tooltip = el("div", "trading-chart-tooltip");
   tooltip.id = "trading-chart-tooltip";
+  tooltip.setAttribute("role", "status");
+  tooltip.setAttribute("aria-live", "polite");
   tooltip.hidden = true;
   let pinnedPoint = null;
   let activePoint = null;
@@ -1482,7 +1620,7 @@ function renderTradingCashflowChart(trading) {
     const total = el("div", "trading-chart-tooltip-total");
     append(
       total,
-      el("span", "", "实收入账现金流"),
+      el("span", "", row.coverageComplete ? "实收入账现金流" : "可确认现金流"),
       el("strong", Number(row.value) < 0 ? "negative" : "positive", usd(row.value)),
     );
     const details = el("div", "trading-chart-tooltip-details");
@@ -1518,8 +1656,8 @@ function renderTradingCashflowChart(trading) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "trading-cashflow-chart");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", `实收入账现金流${descriptions[tradingChartCadence]}折线图`);
+  svg.setAttribute("role", "group");
+  svg.setAttribute("aria-label", `${yearScope || "实收入账现金流"}${descriptions[tradingChartCadence]}折线图`);
 
   [maximum, 0, minimum].forEach((value) => {
     const line = document.createElementNS(svg.namespaceURI, "line");
@@ -1560,7 +1698,14 @@ function renderTradingCashflowChart(trading) {
     point.setAttribute("r", "3.5");
     point.setAttribute("tabindex", "0");
     point.setAttribute("role", "button");
-    point.setAttribute("aria-label", `${row.fullLabel}，实收入账现金流 ${usd(row.value)}`);
+    point.setAttribute(
+      "aria-label",
+      `${row.fullLabel}，${row.coverageComplete ? "实收入账现金流" : "可确认现金流"} ${usd(row.value)}，` +
+      `股票 ${usd(row.intraday_net_pnl)}，期权 ${usd(row.option_net_pnl)}，` +
+      `税后股息 ${usd(row.dividend_cashflow)}，利息 ${usd(row.interest_cashflow)}，` +
+      `手续费 ${usd(negativeMetric(row.fees))}`,
+    );
+    point.setAttribute("aria-describedby", tooltip.id);
     point.setAttribute("class", Number(row.value) < 0 ? "trading-chart-point loss" : "trading-chart-point win");
     const title = document.createElementNS(svg.namespaceURI, "title");
     title.textContent = `${row.fullLabel}：${usd(row.value)}`;
@@ -1696,13 +1841,18 @@ function renderLiveTrading(trading) {
   const live = trading.live || null;
   const target = liveTarget(trading);
   const signal = liveSignal(trading);
+  const financial = liveFinancialComplete({
+    live,
+    transportStatus: liveRuntime.transportStatus,
+    staleAfterMs: 10 * 60_000,
+  });
   const card = el("section", `live-trading-card tone-${signal.tone}`);
   const head = el("div", "live-trading-head");
   const heading = el("div");
   append(
     heading,
     el("p", "eyebrow", "LIVE · PROVISIONAL"),
-    el("h2", "", `${live?.monitoring_day || "本日"} 已实现交易收益`),
+    el("h2", "", `${live?.monitoring_day || "本日"} ${financial.complete ? "已实现交易收益" : "可确认交易收益"}`),
     el("p", "live-trading-window", live?.window_label || "美东 [T-1 20:00, T 20:00)"),
   );
   const refresh = el(
@@ -1732,8 +1882,18 @@ function renderLiveTrading(trading) {
   const primaryCopy = el("div");
   append(
     primaryCopy,
-    term("当日已实现净收益", TERM_DEFINITIONS.netTradingPnl, "live-primary-label"),
-    el("span", "", "已完成股票日内与期权周期 · 已扣可取得手续费"),
+    term(
+      financial.complete ? "当日已实现净收益" : "当日可确认净收益",
+      TERM_DEFINITIONS.netTradingPnl,
+      "live-primary-label",
+    ),
+    el(
+      "span",
+      "",
+      financial.complete
+        ? "连续 FIFO 账本、券商来源与可取得手续费均完整"
+        : financial.reason,
+    ),
   );
   append(primary, primaryCopy, primaryValue);
 
@@ -1766,6 +1926,12 @@ function renderLiveTrading(trading) {
     ["数据年龄", liveAge(signal.ageMs)],
     ["下次页面检查", liveRuntime.nextCheckAt ? liveTime(liveRuntime.nextCheckAt) : "页面可见时每 60 秒"],
     ["开放风险", live?.open_exposure_status === "KNOWN" ? "已取得" : "未知 · 不含未实现盈亏和挂单"],
+    [
+      "Realized 覆盖",
+      live?.realized_coverage_status === "COMPLETE"
+        ? "完整"
+        : `部分 · 排除 ${(live?.excluded_instruments || []).join("、") || "未知标的"}`,
+    ],
   ];
   factRows.forEach(([label, value]) => {
     const row = el("div", "live-fact-row");
@@ -1847,16 +2013,22 @@ function renderTrading() {
   root.appendChild(liveRegion);
   const focus = periods.find((period) => period.cadence === "month") || periods[0];
   if (focus) {
-    const tone = Number(focus.investable_cashflow) < 0 ? "" : "amber";
+    const tone = finiteMetric(focus.investable_cashflow)
+      ? Number(focus.investable_cashflow) < 0 ? "" : "amber"
+      : "";
     const banner = el("section", `risk-banner ${tone}`.trim());
     const copy = el("div");
     append(
       copy,
-      el("h2", "", `${cadenceLabel(focus.cadence)}实收入账现金流 ${usd(focus.investable_cashflow)}`),
+      el(
+        "h2",
+        "",
+        `${cadenceLabel(focus.cadence, focus)} · ${settledPeriodComplete(trading, focus) ? "实收入账现金流" : "可确认金额"} ${usd(focus.investable_cashflow)}`,
+      ),
       el(
         "p",
         "",
-        `${focus.start_date} — ${focus.end_date} · ${tradingAction(focus, summary)}`,
+        `${focus.start_date || "起点未知"} — ${focus.end_date} · ${focus.coverage_reason || ""} ${tradingAction(focus, summary, settledPeriodComplete(trading, focus))}`,
       ),
     );
     append(banner, el("div", "risk-bar"), copy);

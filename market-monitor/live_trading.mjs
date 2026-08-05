@@ -6,7 +6,8 @@ export const PORTFOLIO_GATE_STALE_AFTER_MS = 10 * 60_000;
 export const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60_000;
 
 const HEALTHY = "OK";
-const EXPECTED_LIVE_BROKERS = new Set(["Futu", "Tiger"]);
+const DEFAULT_EXPECTED_LIVE_BROKERS = ["Futu", "Tiger"];
+const ALLOWED_LIVE_BROKERS = new Set(["Futu", "Tiger", "IBKR"]);
 const PORTFOLIO_GATE_VALUES = new Set(["RED", "CLEAR"]);
 const RISK_SNAPSHOT_FIELDS = [
   "portfolio_gate",
@@ -33,6 +34,33 @@ const SOURCE_FAILURE_STATES = new Set([
   "MISSING",
   "FAILED",
 ]);
+
+export function yearCoverageLabel(coverageStatus) {
+  const status = String(coverageStatus || "UNKNOWN").toUpperCase();
+  if (status === "COMPLETE") return "年内累计";
+  if (status === "PARTIAL") return "可确认覆盖期累计";
+  return "累计统计不可确认";
+}
+
+export function rowsWithinYearCoverage(rows, period) {
+  if (String(period?.coverage_status || "UNKNOWN").toUpperCase() === "UNKNOWN") return [];
+  return [...(rows || [])].filter((row) =>
+    row?.date &&
+    (!period?.start_date || row.date >= period.start_date) &&
+    (!period?.end_date || row.date <= period.end_date)
+  );
+}
+
+export function isPeriodCoverageComplete(period) {
+  return String(period?.coverage_status || "UNKNOWN").toUpperCase() === "COMPLETE";
+}
+
+export function yearSeriesScope(period, overallComplete) {
+  const status = String(period?.coverage_status || "UNKNOWN").toUpperCase();
+  if (status === "UNKNOWN") return null;
+  if (status === "PARTIAL") return "可确认覆盖期累计";
+  return overallComplete ? "年内累计" : "年内可确认金额";
+}
 
 function finiteNumber(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -265,48 +293,13 @@ export function assessLiveTradingSignal({
       `组合风险闸门状态为 ${portfolioGate?.status || "MISSING"}，先刷新持仓和保证金信息。`,
     );
   }
-  if (!live || String(live.status || "").toUpperCase() !== "PROVISIONAL") {
-    return uncertain("当前监控日尚无可验证的进行中数据。");
-  }
-  const liveDataStatus = status(live.data_status);
-  if (liveDataStatus !== HEALTHY) {
-    const reason = liveDataStatus === "MISSING" && live.data_status === "NO_ACTIVE_SESSION"
-      ? "当前没有活跃的美东监控日，只展示最近已结算结果。"
-      : `进行中数据状态为 ${live.data_status || "MISSING"}，暂停确定性节奏判断。`;
-    return uncertain(reason);
-  }
+  const financial = liveFinancialComplete({ live, transportStatus, nowMs, staleAfterMs });
+  if (!financial.complete) return uncertain(financial.reason, financial.ageMs);
   if (status(transportStatus) !== HEALTHY) {
     return uncertain("实时通道本次检查失败；页面保留上次成功数据，不据此判断是否达标。");
   }
 
-  const checkedAtMs = timestamp(live.checked_at);
-  if (checkedAtMs === null) return uncertain("缺少券商检查时间，无法确认数据新鲜度。");
-  if (checkedAtMs > Number(nowMs) + MAX_FUTURE_CLOCK_SKEW_MS) {
-    return uncertain("券商检查时间超出允许的时钟偏差，先核对服务器时间。");
-  }
-  const ageMs = Math.max(0, Number(nowMs) - checkedAtMs);
-  if (!Number.isFinite(ageMs) || ageMs > staleAfterMs) {
-    return uncertain("券商数据已超过两个刷新周期，先主动刷新或核对券商。", ageMs);
-  }
-
-  const sources = Array.isArray(live.sources) ? live.sources : [];
-  if (!sources.length) return uncertain("缺少券商来源状态，无法确认收益是否完整。", ageMs);
-  const sourceCounts = new Map();
-  sources.forEach((source) => {
-    const broker = String(source?.broker || "");
-    sourceCounts.set(broker, (sourceCounts.get(broker) || 0) + 1);
-  });
-  const completeSourceShape =
-    sourceCounts.size === EXPECTED_LIVE_BROKERS.size &&
-    [...EXPECTED_LIVE_BROKERS].every((broker) => sourceCounts.get(broker) === 1);
-  if (!completeSourceShape) {
-    return uncertain("Futu 与 Tiger 来源必须各有且仅有一条，当前覆盖不完整。", ageMs);
-  }
-  const unhealthy = sources.filter((source) => status(source?.status) !== HEALTHY);
-  if (unhealthy.length) {
-    const names = unhealthy.map((source) => source.broker || source.source || "未知来源");
-    return uncertain(`${names.join("、")} 数据并非 OK，暂停确定性节奏判断。`, ageMs);
-  }
+  const ageMs = financial.ageMs;
 
   const activeNetPnl = finiteNumber(live.active_net_pnl);
   if (activeNetPnl === null) return uncertain("当日已实现净收益缺失，不能按 0 处理。", ageMs);
@@ -363,6 +356,49 @@ export function assessLiveTradingSignal({
     ageMs,
     pnlCny,
   };
+}
+
+export function liveFinancialComplete({
+  live,
+  transportStatus = HEALTHY,
+  nowMs = Date.now(),
+  staleAfterMs = LIVE_POLL_INTERVAL_MS * 2,
+} = {}) {
+  const fail = (reason, ageMs = null) => ({ complete: false, reason, ageMs });
+  if (!live || String(live.status || "").toUpperCase() !== "PROVISIONAL") {
+    return fail("当前监控日尚无可验证的进行中数据。");
+  }
+  const liveDataStatus = status(live.data_status);
+  if (liveDataStatus !== HEALTHY) {
+    return fail(liveDataStatus === "MISSING" && live.data_status === "NO_ACTIVE_SESSION"
+      ? "当前没有活跃的美东监控日，只展示最近已结算结果。"
+      : `进行中数据状态为 ${live.data_status || "MISSING"}，暂停确定性节奏判断。`);
+  }
+  if (String(live.realized_coverage_status || "PARTIAL").toUpperCase() !== "COMPLETE") {
+    const excluded = Number(live.excluded_instrument_count || 0);
+    return fail(`期初持仓或成本批次覆盖不完整${excluded ? `，已排除 ${excluded} 个标的` : ""}；当前金额仅代表可确认部分。`);
+  }
+  if (status(transportStatus) !== HEALTHY) return fail("实时通道本次检查失败；页面保留上次成功数据，不据此判断是否达标。");
+  const checkedAtMs = timestamp(live.checked_at);
+  if (checkedAtMs === null) return fail("缺少券商检查时间，无法确认数据新鲜度。");
+  if (checkedAtMs > Number(nowMs) + MAX_FUTURE_CLOCK_SKEW_MS) return fail("券商检查时间超出允许的时钟偏差，先核对服务器时间。");
+  const ageMs = Math.max(0, Number(nowMs) - checkedAtMs);
+  if (!Number.isFinite(ageMs) || ageMs > staleAfterMs) return fail("券商数据已超过两个刷新周期，先主动刷新或核对券商。", ageMs);
+  const sources = Array.isArray(live.sources) ? live.sources : [];
+  const sourceCounts = new Map();
+  sources.forEach((source) => sourceCounts.set(String(source?.broker || ""), (sourceCounts.get(String(source?.broker || "")) || 0) + 1));
+  const declaredExpected = Array.isArray(live.expected_brokers) ? live.expected_brokers.map((broker) => String(broker || "")) : DEFAULT_EXPECTED_LIVE_BROKERS;
+  const expectedBrokers = new Set(declaredExpected);
+  const validShape = expectedBrokers.size === declaredExpected.length && expectedBrokers.has("Futu") && expectedBrokers.has("Tiger") && [...expectedBrokers].every((broker) => ALLOWED_LIVE_BROKERS.has(broker));
+  if (!validShape || sources.length !== expectedBrokers.size || ![...expectedBrokers].every((broker) => sourceCounts.get(broker) === 1)) return fail(`${[...expectedBrokers].join("、")} 来源必须各有且仅有一条，当前覆盖不完整。`, ageMs);
+  const unhealthy = sources.filter((source) =>
+    status(source?.status) !== HEALTHY ||
+    !Number.isFinite(Number(source?.fee_coverage_ratio)) ||
+    Number(source.fee_coverage_ratio) < 1,
+  );
+  if (unhealthy.length) return fail(`${unhealthy.map((source) => source.broker || "未知来源").join("、")} 数据或费用覆盖不完整，暂停确定性节奏判断。`, ageMs);
+  if (finiteNumber(live.active_net_pnl) === null) return fail("当日已实现净收益缺失，不能按 0 处理。", ageMs);
+  return { complete: true, reason: "", ageMs };
 }
 
 export function manualRefreshLabel(state, remainingSeconds = null) {
