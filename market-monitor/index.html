@@ -16,6 +16,7 @@
     <link rel="icon" href="./favicon.ico?v=20260801-1" />
     <link rel="shortcut icon" href="./favicon.ico?v=20260801-1" />
     <link rel="stylesheet" href="./styles.css?v=20260804-1" />
+    <script src="./unlock_security.js?v=20260806-1"></script>
     <script type="module" src="./app.js?v=20260804-4"></script>
   </head>
   <body>
@@ -29,12 +30,11 @@
         <p class="unlock-copy">
           数据以美东时间统计，单日窗口为 T-1 夜盘至 T 日盘后结束。
         </p>
-        <form id="unlock-form" autocomplete="off">
+        <form id="unlock-form" action="./" method="get" autocomplete="off">
           <label for="password">访问密码</label>
           <div class="password-row">
             <input
               id="password"
-              name="password"
               type="password"
               autocomplete="current-password"
               inputmode="text"
@@ -46,7 +46,7 @@
           <p id="unlock-error" class="form-error" role="alert" aria-live="polite"></p>
         </form>
         <p class="security-note">
-          密码只用于在本机浏览器解密，不会发送到服务器，也不会被保存。
+          密码只用于本机解密，不会被应用主动上传或保存；请勿把密码放入网址或分享。静态页面不提供服务器端身份认证。
         </p>
       </section>
     </main>
