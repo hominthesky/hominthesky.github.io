@@ -1318,6 +1318,51 @@ input:focus {
 .trading-primary.win .trading-primary-value { color: var(--green); }
 .trading-primary.loss .trading-primary-value { color: var(--red); }
 
+.cashflow-bridge {
+  display: grid;
+  gap: 0;
+  margin: -4px 0 16px;
+  padding: 4px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+}
+
+.cashflow-bridge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 38px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.cashflow-bridge-row.result {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.cashflow-bridge-row.target {
+  color: var(--text-secondary);
+}
+
+.cashflow-bridge-row strong {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cashflow-bridge-row .negative { color: var(--red); }
+.cashflow-bridge-row .positive { color: var(--green); }
+
+.cashflow-bridge-note {
+  margin: 9px 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .chart-cadence-control {
   display: inline-flex;
   gap: 2px;
@@ -1401,6 +1446,12 @@ input:focus {
   stroke-linecap: square;
   stroke-linejoin: miter;
   vector-effect: non-scaling-stroke;
+}
+
+.trading-chart-line.living {
+  stroke: var(--amber);
+  stroke-width: 1.75;
+  stroke-dasharray: 6 4;
 }
 
 .trading-chart-point {
@@ -1501,6 +1552,10 @@ input:focus {
   padding: 9px 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
+}
+
+.trading-chart-tooltip-total.secondary {
+  border-top: 0;
 }
 
 .trading-chart-tooltip-total span,
@@ -2158,6 +2213,19 @@ footer {
   .trading-breakdown-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .cashflow-bridge-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+    padding: 10px 0;
+  }
+
+  .trading-chart-summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
   }
 
   .trading-breakdown-result { text-align: left; }

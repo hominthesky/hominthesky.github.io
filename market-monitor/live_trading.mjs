@@ -4,6 +4,9 @@ export const MANUAL_REFRESH_TIMEOUT_MS = 30_000;
 export const DEFAULT_MONTHLY_TARGET_CNY = 40_000;
 export const PORTFOLIO_GATE_STALE_AFTER_MS = 10 * 60_000;
 export const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60_000;
+export const LIVING_EXPENSE_COVERAGE_CONTRACT_ID = "living_expense_coverage_v1";
+export const LIVING_EXPENSE_COVERAGE_FORMULA =
+  "max(living_expense_net_cashflow_usd * usd_cny_rate, 0) / living_expense_target_cny";
 
 const HEALTHY = "OK";
 const DEFAULT_EXPECTED_LIVE_BROKERS = ["Futu", "Tiger"];
@@ -55,6 +58,43 @@ export function isPeriodCoverageComplete(period) {
   return String(period?.coverage_status || "UNKNOWN").toUpperCase() === "COMPLETE";
 }
 
+export function resolveTradingCashflow(period) {
+  const realizedComplete = period?.realized_coverage_status === "COMPLETE";
+  const dividendComplete =
+    (period?.dividend_coverage_status ?? period?.passive_cashflow_coverage_status) === "COMPLETE";
+  const interestComplete =
+    (period?.interest_coverage_status ?? period?.passive_cashflow_coverage_status) === "COMPLETE";
+
+  let generated = null;
+  if (realizedComplete && dividendComplete) {
+    generated = finiteNumber(period?.generated_cashflow);
+    if (generated === null) {
+      const activeNet = finiteNumber(period?.active_net_pnl) ?? (
+        finiteNumber(period?.intraday_net_pnl) !== null &&
+        finiteNumber(period?.option_net_pnl) !== null
+          ? finiteNumber(period.intraday_net_pnl) + finiteNumber(period.option_net_pnl)
+          : null
+      );
+      const dividend = finiteNumber(period?.dividend_cashflow);
+      if (activeNet !== null && dividend !== null) generated = activeNet + dividend;
+    }
+  }
+
+  let interest = null;
+  if (interestComplete) {
+    interest = finiteNumber(period?.account_interest_cashflow) ??
+      finiteNumber(period?.interest_cashflow);
+  }
+
+  let living = null;
+  if (generated !== null && interest !== null) {
+    living = finiteNumber(period?.living_expense_net_cashflow) ??
+      finiteNumber(period?.investable_cashflow) ??
+      generated + interest;
+  }
+  return { generated, interest, living };
+}
+
 export function yearSeriesScope(period, overallComplete) {
   const status = String(period?.coverage_status || "UNKNOWN").toUpperCase();
   if (status === "UNKNOWN") return null;
@@ -78,6 +118,26 @@ function status(value, fallback = "MISSING") {
   return normalized === HEALTHY || SOURCE_FAILURE_STATES.has(normalized)
     ? normalized
     : fallback;
+}
+
+export function combineHealthStatuses(values) {
+  const priority = {
+    OK: 0,
+    EXPECTED_LAG: 1,
+    PARTIAL: 2,
+    STALE: 3,
+    MISSING: 4,
+    FAILED: 5,
+  };
+  const normalized = [...(values || [])].map((value) => {
+    const raw = String(value || "MISSING").toUpperCase();
+    if (raw === "COMPLETE") return "OK";
+    if (raw === "UNKNOWN") return "MISSING";
+    return status(raw);
+  });
+  return normalized.length
+    ? normalized.reduce((worst, value) => priority[value] > priority[worst] ? value : worst, "OK")
+    : "MISSING";
 }
 
 function isoDay(value) {
@@ -240,6 +300,63 @@ export function calculateDailyTarget({
     remainingGapCny,
     dailyTargetCny,
     dailyTargetUsd: dailyTargetCny / rate,
+  };
+}
+
+/** Compare settled account-level cash generation with a monthly living-expense target. */
+export function calculateLivingExpenseCoverage({
+  monthlyTargetCny,
+  livingExpenseNetCashflowUsd,
+  usdCnyRate,
+  coverageStatus = "OK",
+  fxStatus = "OK",
+}) {
+  const target = finiteNumber(monthlyTargetCny);
+  const netUsd = finiteNumber(livingExpenseNetCashflowUsd);
+  const rate = finiteNumber(usdCnyRate);
+  const financialHealth = status(coverageStatus);
+  const fxHealth = status(fxStatus);
+  const base = {
+    contractId: LIVING_EXPENSE_COVERAGE_CONTRACT_ID,
+    formula: LIVING_EXPENSE_COVERAGE_FORMULA,
+    monthlyTargetCny: target,
+    livingExpenseNetCashflowUsd: netUsd,
+    livingExpenseNetCashflowCny: null,
+    coverageRatio: null,
+    surplusCny: null,
+    usdCnyRate: rate,
+  };
+  if (financialHealth !== HEALTHY) {
+    return {
+      ...base,
+      status: financialHealth,
+      reason: "历史、交易、股息或利息覆盖不完整，不能判断生活开支覆盖。",
+    };
+  }
+  if (fxHealth !== HEALTHY || rate === null || rate <= 0) {
+    return {
+      ...base,
+      status: fxHealth === HEALTHY ? "MISSING" : fxHealth,
+      reason: "USD/CNY 汇率不可用，不能判断人民币生活开支覆盖。",
+    };
+  }
+  if (target === null || target <= 0 || netUsd === null) {
+    return {
+      ...base,
+      status: "MISSING",
+      reason: "生活开支目标或账户净现金流不可用。",
+    };
+  }
+  const netCny = netUsd * rate;
+  return {
+    ...base,
+    status: HEALTHY,
+    livingExpenseNetCashflowCny: netCny,
+    coverageRatio: Math.max(netCny, 0) / target,
+    surplusCny: netCny - target,
+    reason: netCny >= target
+      ? "本期已入账净现金流覆盖目标；这不等于券商安全可提现金额。"
+      : "本期已入账净现金流尚未覆盖目标；缺口不构成追单或扩大风险的理由。",
   };
 }
 
