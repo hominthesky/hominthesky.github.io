@@ -1444,7 +1444,7 @@ function renderTradingPerformance(trading, portfolioSummary) {
         "账户级现金调整",
         "cost",
         [
-          { label: "现金流创造", value: generatedCashflow, definition: TERM_DEFINITIONS.generatedCashflow },
+          { label: "现金流创造", value: displayedGeneratedCashflow, definition: TERM_DEFINITIONS.generatedCashflow },
           { label: "融资 / 借券 / 其他利息", value: accountInterest, definition: "服务长期持仓的融资成本及账户其他已入账利息净额；负值减少生活开支可用现金，但不归因给日内或期权策略。" },
           { label: "生活开支评估净现金流", value: livingCashflow, definition: TERM_DEFINITIONS.livingExpenseCashflow, primary: true },
         ],
