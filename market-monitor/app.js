@@ -1961,6 +1961,27 @@ function liveSourceRows(live) {
   return list;
 }
 
+function liveBrokerIndicator(source) {
+  const broker = source?.broker || source?.source || "未知来源";
+  const sourceStatus = String(source?.status || "MISSING").toUpperCase();
+  const tone = sourceStatus === "OK"
+    ? "ok"
+    : sourceStatus === "FAILED"
+      ? "failed"
+      : sourceStatus === "PARTIAL" || sourceStatus === "STALE"
+        ? "warning"
+        : "missing";
+  const indicator = el("span", `live-broker-indicator ${tone}`);
+  indicator.setAttribute("aria-label", `${broker} ${sourceStatus}`);
+  indicator.title = `${broker} · ${sourceStatus}`;
+  append(
+    indicator,
+    el("span", "live-broker-dot", ""),
+    el("strong", "", broker),
+  );
+  return indicator;
+}
+
 function livePreferenceField({ id, label, value, placeholder, storageKey, suffix }) {
   const field = el("label", "live-preference-field");
   const labelNode = el("span", "", label);
@@ -2086,6 +2107,48 @@ function renderLiveTrading(trading) {
     facts.appendChild(row);
   });
 
+  const statusDetails = el("div", "live-status-disclosure");
+  const statusSummary = el("button", "live-status-summary");
+  statusSummary.type = "button";
+  statusSummary.setAttribute("aria-expanded", "false");
+  statusSummary.setAttribute("aria-controls", "live-status-detail-body");
+  const toggleStatusDetails = () => {
+    const isOpen = statusDetails.classList.toggle("is-open");
+    statusSummary.setAttribute("aria-expanded", String(isOpen));
+    statusBody.hidden = !isOpen;
+  };
+  statusSummary.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleStatusDetails();
+  });
+  statusSummary.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggleStatusDetails();
+  });
+  const statusIndicators = el("span", "live-status-indicators");
+  if (Array.isArray(live?.sources) && live.sources.length) {
+    live.sources.forEach((source) => statusIndicators.appendChild(liveBrokerIndicator(source)));
+  } else {
+    statusIndicators.appendChild(liveBrokerIndicator(null));
+  }
+  const sourceIssues = Array.isArray(live?.sources) && live.sources.length
+    ? live.sources.filter((source) => String(source?.status || "MISSING").toUpperCase() !== "OK").length
+    : 1;
+  const diagnosticIssues = sourceIssues
+    + (live?.realized_coverage_status === "COMPLETE" ? 0 : 1)
+    + (live?.open_exposure_status === "KNOWN" ? 0 : 1)
+    + (Number.isFinite(signal.ageMs) ? 0 : 1);
+  const statusMeta = diagnosticIssues
+    ? `${diagnosticIssues} 项待核对 · ${liveAge(signal.ageMs)}`
+    : `覆盖完整 · ${liveAge(signal.ageMs)}`;
+  append(
+    statusSummary,
+    statusIndicators,
+    el("span", `live-status-meta ${diagnosticIssues ? "warning" : ""}`.trim(), statusMeta),
+    el("span", "live-status-action", "详情"),
+  );
+
   const targetPanel = el("div", "live-target-panel");
   const targetHead = el("div", "live-target-head");
   append(
@@ -2125,7 +2188,12 @@ function renderLiveTrading(trading) {
     ? "正在检查服务器上的最新加密快照。"
     : liveRuntime.error || "自动检查只更新进行中数据；历史结算结果保持不变。";
   statusLine.textContent = pollCopy;
-  append(card, head, primary, details, signalBlock, facts, liveSourceRows(live), targetPanel, statusLine);
+  const statusBody = el("div", "live-status-body");
+  statusBody.id = "live-status-detail-body";
+  statusBody.hidden = true;
+  append(statusBody, facts, liveSourceRows(live), statusLine);
+  append(statusDetails, statusSummary, statusBody);
+  append(card, head, primary, details, signalBlock, statusDetails, targetPanel);
   return card;
 }
 

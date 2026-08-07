@@ -1184,6 +1184,57 @@ input:focus {
 .live-signal strong { font-size: 13px; }
 .live-signal p { margin: 5px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.55; }
 
+.live-status-disclosure {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.live-status-summary {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 38px;
+  padding: 7px 11px;
+  cursor: pointer;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+.live-status-summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.live-status-indicators { display: flex; align-items: center; gap: 10px; }
+.live-broker-indicator { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.live-broker-indicator strong { font-size: 11px; }
+.live-broker-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--muted);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--muted) 14%, transparent);
+}
+.live-broker-indicator.ok .live-broker-dot { background: var(--green); }
+.live-broker-indicator.warning .live-broker-dot { background: var(--amber); }
+.live-broker-indicator.failed .live-broker-dot { background: var(--red); }
+.live-status-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-status-meta.warning { color: var(--amber); }
+.live-status-action { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.live-status-action::after { content: "⌄"; display: inline-block; margin-left: 5px; transition: transform 160ms ease; }
+.live-status-disclosure.is-open .live-status-action::after { transform: rotate(180deg); }
+.live-status-body { display: grid; gap: 8px; padding: 8px; border-top: 1px solid var(--line); }
+
 .live-fact-grid,
 .live-source-list {
   display: grid;
@@ -2238,6 +2289,8 @@ footer {
   }
 
   .live-refresh-button { width: 100%; }
+  .live-status-summary { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; }
+  .live-status-meta { grid-column: 1 / -1; text-align: left; }
   .live-detail-grid,
   .live-fact-grid,
   .live-source-list,
