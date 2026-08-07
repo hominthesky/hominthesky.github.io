@@ -547,6 +547,10 @@ export function liveFinancialFingerprint(live) {
     fees: live.fees ?? null,
     active_net_pnl: live.active_net_pnl ?? null,
     cycle_count: live.cycle_count ?? null,
+    cashflow_generated: live.cashflow_generated ?? null,
+    confirmed_cashflow_generated: live.confirmed_cashflow_generated ?? null,
+    cashflow_active_equity_net_pnl: live.cashflow_active_equity_net_pnl ?? null,
+    cashflow_dividend: live.cashflow_dividend ?? null,
     intraday: category(live.intraday),
     options: category(live.options),
   });

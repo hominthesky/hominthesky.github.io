@@ -119,7 +119,7 @@ const TERM_DEFINITIONS = {
   dividendIncome:
     "已取得的 USD 现金股息减去股息预扣税，为税后股息分红现金流；不含股票送股、资本利得和未入账应收股息。",
   generatedCashflow:
-    "股票日内与期权已完成周期扣除可取得交易费用后的净收益，加上税后已入账现金股息。用于衡量策略与股息的现金创造能力；不含融资利息、长期资产出售、本金周转和未实现盈亏。",
+    "已归类为主动交易的股票完整周期（含日内与隔夜）与期权完整周期扣除可取得交易费用后的净收益，加上税后已入账现金股息。用于衡量策略与股息的现金创造能力；不含融资利息、长期资产出售、本金周转和未实现盈亏。",
   livingExpenseCashflow:
     "现金流创造加上账户实际入账的利息净额。用于评估生活开支覆盖，但不等于券商安全可提现金额；实际提现还受结算现金、保证金安全垫和税务准备金约束。",
 };
@@ -1169,6 +1169,7 @@ function periodCashflowHealth(trading, period) {
     ...sourceStatuses,
     period?.coverage_status,
     period?.realized_coverage_status,
+    period?.active_scope_coverage_status,
     period?.dividend_coverage_status ?? period?.passive_cashflow_coverage_status,
     period?.interest_coverage_status ?? period?.passive_cashflow_coverage_status,
   ]);
@@ -1317,11 +1318,13 @@ function renderTradingPerformance(trading, portfolioSummary) {
     const historyComplete = isPeriodCoverageComplete(period);
     const coverageComplete = settledPeriodComplete(trading, period);
     const generatedCashflow = periodGeneratedCashflow(period);
+    const confirmedGeneratedCashflow = finiteMetric(period.confirmed_generated_cashflow);
+    const displayedGeneratedCashflow = generatedCashflow ?? confirmedGeneratedCashflow;
     const accountInterest = periodAccountInterest(period);
     const livingCashflow = periodLivingExpenseCashflow(period);
     const expenseCoverage = livingExpenseCoverage(period, trading);
-    const periodTone = finiteMetric(generatedCashflow)
-      ? Number(generatedCashflow) < 0 ? "tone-red" : "tone-green"
+    const periodTone = finiteMetric(displayedGeneratedCashflow)
+      ? Number(displayedGeneratedCashflow) < 0 ? "tone-red" : "tone-green"
       : "";
     const row = el("article", `trading-period ${periodTone}`.trim());
     const head = el("div", "trading-period-head");
@@ -1333,8 +1336,8 @@ function renderTradingPerformance(trading, portfolioSummary) {
     const primary = el(
       "div",
       `trading-primary ${
-        finiteMetric(generatedCashflow)
-          ? Number(generatedCashflow) < 0 ? "loss" : "win"
+        finiteMetric(displayedGeneratedCashflow)
+          ? Number(displayedGeneratedCashflow) < 0 ? "loss" : "win"
           : ""
       }`.trim(),
     );
@@ -1342,7 +1345,7 @@ function renderTradingPerformance(trading, portfolioSummary) {
     append(
       primaryCopy,
       term(
-        coverageComplete ? "现金流创造" : "可确认现金流创造",
+        coverageComplete ? "现金流创造" : "已确认现金流创造",
         TERM_DEFINITIONS.generatedCashflow,
         "trading-primary-label",
       ),
@@ -1350,7 +1353,9 @@ function renderTradingPerformance(trading, portfolioSummary) {
         "span",
         "trading-primary-formula",
         coverageComplete
-          ? "股票日内净收益 + 期权净收益 + 税后股息"
+          ? "主动股票净收益（含已归类隔夜）+ 期权净收益 + 税后股息"
+          : period.active_scope_coverage_status !== "COMPLETE"
+            ? `另有 ${period.unclassified_overnight_realization_count || 0} 笔隔夜股票待归类；完整总额未知`
           : !realizedComplete
             ? `已排除期初成本不明的 ${(period.excluded_instruments || []).join("、") || "未知标的"}`
             : !historyComplete
@@ -1363,7 +1368,7 @@ function renderTradingPerformance(trading, portfolioSummary) {
     append(
       primary,
       primaryCopy,
-      el("strong", "trading-primary-value", usd(generatedCashflow)),
+      el("strong", "trading-primary-value", usd(displayedGeneratedCashflow)),
     );
     const bridge = el("div", "cashflow-bridge");
     const interestRow = el("div", "cashflow-bridge-row");
@@ -1403,15 +1408,15 @@ function renderTradingPerformance(trading, portfolioSummary) {
     append(
       inputs,
       cashflowGroup(
-        "股票日内",
-        `${number(period.intraday_closed_trades, 0)} 个完成周期`,
+        "股票主动交易",
+        `${number(period.intraday_closed_trades, 0)} 个日内 + ${number(period.overnight_equity_closed_trades, 0)} 个已归类隔夜周期`,
         "stock",
         [
-          { label: "毛收益（未扣手续费）", value: period.intraday_gross_pnl, definition: TERM_DEFINITIONS.grossTradingPnl },
-          { label: "手续费成本", value: negativeMetric(period.intraday_fees), definition: "已分摊到股票日内完整周期的佣金及费用，以负数显示。" },
-          { label: "扣费后净入账", value: period.intraday_net_pnl, definition: TERM_DEFINITIONS.netTradingPnl, primary: true },
+          { label: "毛收益（未扣手续费）", value: period.active_equity_gross_pnl, definition: TERM_DEFINITIONS.grossTradingPnl },
+          { label: "手续费成本", value: negativeMetric(period.active_equity_fees), definition: "已分摊到主动股票完整周期的佣金及费用，以负数显示。" },
+          { label: "扣费后主动净收益", value: period.active_equity_net_pnl, definition: TERM_DEFINITIONS.netTradingPnl, primary: true },
         ],
-        `胜率 ${pct(period.intraday_win_rate)} · 利润因子 ${number(period.intraday_profit_factor, 2)} · 现金流贡献 ${pct(period.intraday_cashflow_contribution)}`,
+        `其中日内 ${usd(period.intraday_net_pnl)} · 已归类隔夜 ${usd(period.overnight_equity_net_pnl)} · 现金流贡献 ${pct(period.active_equity_cashflow_contribution)}`,
       ),
       cashflowGroup(
         "期权",
@@ -1448,10 +1453,12 @@ function renderTradingPerformance(trading, portfolioSummary) {
       ),
     );
     const scopeNote = period.cashflow_scope === "ACTIVE_PLUS_PASSIVE"
-      ? `贡献度只分解股票日内、期权和税后股息；长期持仓融资利息仅调整生活开支评估净现金流${period.excluded_non_usd_cashflow_records ? `；另有 ${period.excluded_non_usd_cashflow_records} 条非 USD 流水未换汇、已排除` : ""}。`
+      ? `贡献度只分解主动股票、期权和税后股息；长期持仓融资利息仅调整生活开支评估净现金流${period.long_term_realization_count ? `；已排除 ${period.long_term_realization_count} 笔长期资产处置` : ""}${period.excluded_non_usd_cashflow_records ? `；另有 ${period.excluded_non_usd_cashflow_records} 条非 USD 流水未换汇、已排除` : ""}。`
       : `${period.passive_cashflow_coverage_reason || "股息 / 利息流水覆盖不完整。"} 当前金额仅含可确认来源，不可作为可分配现金、追加交易或结束当日交易的依据。`;
     const coverageNote = !realizedComplete
       ? `Realized 配对仅部分覆盖：排除 ${period.excluded_instrument_count || 0} 个标的、${period.excluded_realization_count || 0} 笔无法可靠配对的平仓；不得把本卡金额视为账户全部已实现收益。`
+      : period.active_scope_coverage_status !== "COMPLETE"
+        ? `有 ${period.unclassified_overnight_realization_count || 0} 笔隔夜股票尚未标记为主动或长期；已确认小计不代表完整总额。`
       : period.coverage_status === "PARTIAL"
         ? "Realized 配对覆盖完整，但历史范围不完整；本卡金额只代表上述实际覆盖期。"
         : period.coverage_status === "UNKNOWN"
@@ -1530,6 +1537,7 @@ function tradingChartSeries(rows, cadence, yearPeriod = null, yearComplete = fal
       coverageComplete: Boolean(
       sourcesComplete &&
       row.realized_coverage_status === "COMPLETE" &&
+      row.active_scope_coverage_status === "COMPLETE" &&
       (row.dividend_coverage_status ?? row.passive_cashflow_coverage_status) === "COMPLETE" &&
       (row.interest_coverage_status ?? row.passive_cashflow_coverage_status) === "COMPLETE" &&
       (cadence === "year" ? yearComplete : true),
@@ -1580,6 +1588,7 @@ function tradingChartSeries(rows, cadence, yearPeriod = null, yearComplete = fal
     });
     group.coverageComplete = group.coverageComplete &&
       row.realized_coverage_status === "COMPLETE" &&
+      row.active_scope_coverage_status === "COMPLETE" &&
       (row.dividend_coverage_status ?? row.passive_cashflow_coverage_status) === "COMPLETE" &&
       (row.interest_coverage_status ?? row.passive_cashflow_coverage_status) === "COMPLETE";
     groups.set(key, group);
@@ -2014,13 +2023,16 @@ function renderLiveTrading(trading) {
     transportStatus: liveRuntime.transportStatus,
     staleAfterMs: 10 * 60_000,
   });
+  const cashflowValue = live?.cashflow_generated ?? live?.confirmed_cashflow_generated;
+  const cashflowComplete = live?.cashflow_generated !== null && live?.cashflow_generated !== undefined;
+  const cashflowScopeComplete = live?.active_scope_coverage_status === "COMPLETE";
   const card = el("section", `live-trading-card tone-${signal.tone}`);
   const head = el("div", "live-trading-head");
   const heading = el("div");
   append(
     heading,
     el("p", "eyebrow", "LIVE · PROVISIONAL"),
-    el("h2", "", `${live?.monitoring_day || "本日"} ${financial.complete ? "已实现交易收益" : "可确认交易收益"}`),
+    el("h2", "", `${live?.monitoring_day || "本日"} ${cashflowComplete ? "现金流创造" : "已确认现金流创造"}`),
     el("p", "live-trading-window", live?.window_label || "美东 [T-1 20:00, T 20:00)"),
   );
   const refresh = el(
@@ -2044,23 +2056,27 @@ function renderLiveTrading(trading) {
   const primary = el("div", "live-primary");
   const primaryValue = el(
     "strong",
-    Number(live?.active_net_pnl) < 0 ? "negative" : Number(live?.active_net_pnl) > 0 ? "positive" : "",
-    usd(live?.active_net_pnl),
+    Number(cashflowValue) < 0 ? "negative" : Number(cashflowValue) > 0 ? "positive" : "",
+    usd(cashflowValue),
   );
   const primaryCopy = el("div");
   append(
     primaryCopy,
     term(
-      financial.complete ? "当日已实现净收益" : "当日可确认净收益",
-      TERM_DEFINITIONS.netTradingPnl,
+      cashflowComplete ? "当日现金流创造" : "当日已确认现金流创造",
+      TERM_DEFINITIONS.generatedCashflow,
       "live-primary-label",
     ),
     el(
       "span",
       "",
-      financial.complete
-        ? "连续 FIFO 账本、券商来源与可取得手续费均完整"
-        : financial.reason,
+      cashflowComplete
+        ? "已归类的主动股票、期权与税后已入账股息；不含长期资产处置"
+        : !cashflowScopeComplete
+          ? `已排除 ${live?.unclassified_overnight_realization_count || 0} 笔未归类隔夜平仓；显示已确认小计`
+          : financial.complete
+            ? "连续 FIFO 账本、券商来源与可取得手续费均完整"
+            : financial.reason,
     ),
   );
   append(primary, primaryCopy, primaryValue);
@@ -2068,8 +2084,10 @@ function renderLiveTrading(trading) {
   const details = el("div", "live-detail-grid");
   [
     ["股票日内净入账", live?.intraday?.net_pnl, `${live?.intraday?.closed_trades ?? "—"} 个完成周期`],
+    ["已归类隔夜净入账", live?.cashflow_overnight_equity_net_pnl, "仅计入标为主动交易的完整周期"],
     ["期权净入账", live?.options?.net_pnl, `${live?.options?.closed_trades ?? "—"} 个完成周期`],
-    ["可取得手续费", live?.fees === null || live?.fees === undefined ? null : -Math.abs(Number(live.fees)), "已包含在当日净收益"],
+    ["税后已入账股息", live?.cashflow_dividend, "不含应收或未入账股息"],
+    ["可取得手续费", live?.cashflow_active_fees === null || live?.cashflow_active_fees === undefined ? null : -Math.abs(Number(live.cashflow_active_fees)), "已包含在当日现金流创造"],
   ].forEach(([label, value, note]) => {
     const item = el("div", "live-detail-item");
     append(
@@ -2099,6 +2117,12 @@ function renderLiveTrading(trading) {
       live?.realized_coverage_status === "COMPLETE"
         ? "完整"
         : `部分 · 排除 ${(live?.excluded_instruments || []).join("、") || "未知标的"}`,
+    ],
+    [
+      "隔夜归类",
+      cashflowScopeComplete
+        ? "完整"
+        : `待归类 ${live?.unclassified_overnight_realization_count || 0} 笔；长期资产处置不计入`,
     ],
   ];
   factRows.forEach(([label, value]) => {
