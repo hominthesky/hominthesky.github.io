@@ -95,6 +95,21 @@ export function resolveTradingCashflow(period) {
   return { generated, interest, living };
 }
 
+/**
+ * Return the numeric cash-flow value that the period card may display.
+ *
+ * A complete governed total takes precedence. When the period is incomplete,
+ * only the explicitly numeric confirmed subtotal may be shown. Predicates,
+ * booleans and other truthy values must never cross this financial-value
+ * boundary because JavaScript would otherwise coerce `true` to USD 1.
+ */
+export function periodDisplayGeneratedCashflow(period, periodComplete = false) {
+  const field = periodComplete === true
+    ? period?.generated_cashflow
+    : period?.confirmed_generated_cashflow;
+  return typeof field === "number" && Number.isFinite(field) ? field : null;
+}
+
 export function yearSeriesScope(period, overallComplete) {
   const status = String(period?.coverage_status || "UNKNOWN").toUpperCase();
   if (status === "UNKNOWN") return null;
@@ -104,6 +119,7 @@ export function yearSeriesScope(period, overallComplete) {
 
 function finiteNumber(value) {
   if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "boolean") return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }

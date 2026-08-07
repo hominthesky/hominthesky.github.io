@@ -15,13 +15,14 @@ import {
   liveFinancialComplete,
   isPeriodCoverageComplete,
   manualRefreshLabel,
+  periodDisplayGeneratedCashflow,
   refreshProofMessage,
   resolveTradingCashflow,
   resolvePendingManualRefresh,
   rowsWithinYearCoverage,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260807-1";
+} from "./live_trading.mjs?v=20260808-1";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -288,12 +289,12 @@ function number(value, digits = 1) {
   });
 }
 
-function finiteMetric(value) {
-  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+function isFiniteMetric(value) {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 function usd(value, compact = false) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+  if (!isFiniteMetric(value)) return "—";
   const fx = Number(monitorData?.meta?.usd_cny_rate);
   const useCny = displayCurrency === "CNY" && Number.isFinite(fx) && fx > 0;
   const amount = Number(value) * (useCny ? fx : 1);
@@ -307,7 +308,7 @@ function usd(value, compact = false) {
 }
 
 function cny(value) {
-  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  if (!isFiniteMetric(value)) return "—";
   return new Intl.NumberFormat("zh-CN", {
     style: "currency",
     currency: "CNY",
@@ -317,7 +318,7 @@ function cny(value) {
 }
 
 function usdExact(value) {
-  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  if (!isFiniteMetric(value)) return "—";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
@@ -655,16 +656,16 @@ function actionTone(label) {
 }
 
 function portfolioMetricGuidance(summary) {
-  const leverage = finiteMetric(summary.gross_leverage)
+  const leverage = isFiniteMetric(summary.gross_leverage)
     ? Number(summary.gross_leverage)
     : null;
-  const leverageRed = finiteMetric(summary.gross_leverage_red)
+  const leverageRed = isFiniteMetric(summary.gross_leverage_red)
     ? Number(summary.gross_leverage_red)
     : null;
-  const attackExposure = finiteMetric(summary.attack_exposure_pct_nav)
+  const attackExposure = isFiniteMetric(summary.attack_exposure_pct_nav)
     ? Number(summary.attack_exposure_pct_nav)
     : null;
-  const attackTarget = finiteMetric(summary.attack_target_pct_nav)
+  const attackTarget = isFiniteMetric(summary.attack_target_pct_nav)
     ? Number(summary.attack_target_pct_nav)
     : null;
   return {
@@ -975,14 +976,14 @@ function renderPersonal() {
   const metricCards = [
     metricCard(
       "组合毛杠杆",
-      finiteMetric(summary.gross_leverage)
+      isFiniteMetric(summary.gross_leverage)
         ? `${number(summary.gross_leverage, 2)}x`
         : "—",
       `治理红线 ${number(summary.gross_leverage_red, 2)}x`,
       guidance.leverage,
     ),
   ];
-  if (finiteMetric(summary.derived_nav_usd)) {
+  if (isFiniteMetric(summary.derived_nav_usd)) {
     metricCards.unshift(
       metricCard(
         "券商账户净资产",
@@ -997,7 +998,7 @@ function renderPersonal() {
       ),
     );
   }
-  if (finiteMetric(summary.gross_market_value_usd)) {
+  if (isFiniteMetric(summary.gross_market_value_usd)) {
     metricCards.push(
       metricCard(
         "绝对毛持仓价值",
@@ -1013,7 +1014,7 @@ function renderPersonal() {
     );
   }
   if (
-    finiteMetric(summary.required_gross_reduction_usd_to_red) &&
+    isFiniteMetric(summary.required_gross_reduction_usd_to_red) &&
     Number(summary.required_gross_reduction_usd_to_red) > 0
   ) {
     metricCards.push(metricCard(
@@ -1023,7 +1024,7 @@ function renderPersonal() {
       guidance.reduction,
     ));
   }
-  if (finiteMetric(summary.attack_exposure_pct_nav)) {
+  if (isFiniteMetric(summary.attack_exposure_pct_nav)) {
     metricCards.push(metricCard(
       "高进攻敞口 / NAV",
       pct(summary.attack_exposure_pct_nav),
@@ -1031,7 +1032,7 @@ function renderPersonal() {
       guidance.attack,
     ));
   }
-  if (finiteMetric(summary.highest_account_gross_leverage)) {
+  if (isFiniteMetric(summary.highest_account_gross_leverage)) {
     metricCards.push(metricCard(
       "最高账户杠杆",
       `${number(summary.highest_account_gross_leverage, 2)}x`,
@@ -1255,7 +1256,7 @@ function cashflowMetric(label, amount, definition, emphasis = false) {
 }
 
 function negativeMetric(value) {
-  return finiteMetric(value) ? -Number(value) : null;
+  return isFiniteMetric(value) ? -Number(value) : null;
 }
 
 function cashflowGroup(title, subtitle, tone, metrics, footer) {
@@ -1317,13 +1318,11 @@ function renderTradingPerformance(trading, portfolioSummary) {
     const realizedComplete = period?.realized_coverage_status === "COMPLETE";
     const historyComplete = isPeriodCoverageComplete(period);
     const coverageComplete = settledPeriodComplete(trading, period);
-    const generatedCashflow = periodGeneratedCashflow(period);
-    const confirmedGeneratedCashflow = finiteMetric(period.confirmed_generated_cashflow);
-    const displayedGeneratedCashflow = generatedCashflow ?? confirmedGeneratedCashflow;
+    const displayedGeneratedCashflow = periodDisplayGeneratedCashflow(period, coverageComplete);
     const accountInterest = periodAccountInterest(period);
     const livingCashflow = periodLivingExpenseCashflow(period);
     const expenseCoverage = livingExpenseCoverage(period, trading);
-    const periodTone = finiteMetric(displayedGeneratedCashflow)
+    const periodTone = isFiniteMetric(displayedGeneratedCashflow)
       ? Number(displayedGeneratedCashflow) < 0 ? "tone-red" : "tone-green"
       : "";
     const row = el("article", `trading-period ${periodTone}`.trim());
@@ -1336,7 +1335,7 @@ function renderTradingPerformance(trading, portfolioSummary) {
     const primary = el(
       "div",
       `trading-primary ${
-        finiteMetric(displayedGeneratedCashflow)
+        isFiniteMetric(displayedGeneratedCashflow)
           ? Number(displayedGeneratedCashflow) < 0 ? "loss" : "win"
           : ""
       }`.trim(),
@@ -1532,7 +1531,7 @@ function tradingChartSeries(rows, cadence, yearPeriod = null, yearComplete = fal
         key,
         key === "account_interest_cashflow"
           ? values.interest
-          : finiteMetric(row[key]) ? Number(row[key]) : null,
+          : isFiniteMetric(row[key]) ? Number(row[key]) : null,
       ])),
       coverageComplete: Boolean(
       sourcesComplete &&
@@ -1550,7 +1549,7 @@ function tradingChartSeries(rows, cadence, yearPeriod = null, yearComplete = fal
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   if (cadence === "day") {
     return ordered
-      .filter((row) => finiteMetric(chartCashflowValues(row).generated))
+      .filter((row) => isFiniteMetric(chartCashflowValues(row).generated))
       .slice(-30)
       .map((row) => normalized(row, { label: row.date.slice(5), fullLabel: row.date }));
   }
@@ -1575,15 +1574,15 @@ function tradingChartSeries(rows, cadence, yearPeriod = null, yearComplete = fal
       livingKnown: true,
     };
     const cashflow = chartCashflowValues(row);
-    if (finiteMetric(cashflow.generated)) group.generated_cashflow += Number(cashflow.generated);
+    if (isFiniteMetric(cashflow.generated)) group.generated_cashflow += Number(cashflow.generated);
     else group.generatedKnown = false;
-    if (finiteMetric(cashflow.living)) group.living_expense_net_cashflow += Number(cashflow.living);
+    if (isFiniteMetric(cashflow.living)) group.living_expense_net_cashflow += Number(cashflow.living);
     else group.livingKnown = false;
     components.forEach((component) => {
       const value = component === "account_interest_cashflow"
         ? cashflow.interest
         : row[component];
-      if (finiteMetric(value)) group[component] += Number(value);
+      if (isFiniteMetric(value)) group[component] += Number(value);
       else group.componentsKnown = false;
     });
     group.coverageComplete = group.coverageComplete &&
@@ -1615,8 +1614,8 @@ function tradingChartSeries(rows, cadence, yearPeriod = null, yearComplete = fal
       ),
     };
   });
-  if (cadence === "week") return series.filter((row) => finiteMetric(row.value)).slice(-16);
-  if (cadence === "month") return series.filter((row) => finiteMetric(row.value)).slice(-12);
+  if (cadence === "week") return series.filter((row) => isFiniteMetric(row.value)).slice(-16);
+  if (cadence === "month") return series.filter((row) => isFiniteMetric(row.value)).slice(-12);
   const latestYear = series.at(-1)?.label.slice(0, 4);
   series = series.filter((row) => row.label.startsWith(latestYear));
   const cumulative = {
@@ -1626,7 +1625,7 @@ function tradingChartSeries(rows, cadence, yearPeriod = null, yearComplete = fal
   };
   return series.map((row) => {
     Object.keys(cumulative).forEach((key) => {
-      if (finiteMetric(cumulative[key]) && finiteMetric(row[key])) {
+      if (isFiniteMetric(cumulative[key]) && isFiniteMetric(row[key])) {
         cumulative[key] += Number(row[key]);
       } else {
         cumulative[key] = null;
@@ -1634,7 +1633,7 @@ function tradingChartSeries(rows, cadence, yearPeriod = null, yearComplete = fal
     });
     const scope = yearSeriesScope(yearPeriod, yearComplete);
     return { ...row, ...cumulative, fullLabel: `${row.fullLabel} ${scope}` };
-  }).filter((row) => finiteMetric(row.value));
+  }).filter((row) => isFiniteMetric(row.value));
 }
 
 function renderTradingCashflowChart(trading) {
@@ -1705,7 +1704,7 @@ function renderTradingCashflowChart(trading) {
   const top = 18;
   const bottom = 215;
   const values = series.flatMap((row) =>
-    [row.value, row.livingValue].filter(finiteMetric).map(Number),
+    [row.value, row.livingValue].filter(isFiniteMetric).map(Number),
   );
   let minimum = Math.min(0, ...values);
   let maximum = Math.max(0, ...values);
@@ -1774,7 +1773,7 @@ function renderTradingCashflowChart(trading) {
       ["期权净入账", row.option_net_pnl],
       ["税后股息", row.dividend_cashflow],
       ["长期持仓融资 / 其他利息", row.account_interest_cashflow],
-      ["手续费（已含在交易净额）", finiteMetric(row.fees) ? -Math.abs(Number(row.fees)) : null],
+      ["手续费（已含在交易净额）", isFiniteMetric(row.fees) ? -Math.abs(Number(row.fees)) : null],
     ].forEach(([label, value]) => {
       const detail = el("div");
       append(detail, el("span", "", label), el("strong", "", usd(value)));
@@ -1829,7 +1828,7 @@ function renderTradingCashflowChart(trading) {
   polyline.setAttribute("class", "trading-chart-line");
   svg.appendChild(polyline);
 
-  if (series.every((row) => finiteMetric(row.livingValue))) {
+  if (series.every((row) => isFiniteMetric(row.livingValue))) {
     const livingPolyline = document.createElementNS(svg.namespaceURI, "polyline");
     livingPolyline.setAttribute(
       "points",
@@ -2255,7 +2254,7 @@ function renderTrading() {
     const generated = periodGeneratedCashflow(focus);
     const living = periodLivingExpenseCashflow(focus);
     const coverage = livingExpenseCoverage(focus, trading);
-    const tone = finiteMetric(living)
+    const tone = isFiniteMetric(living)
       ? Number(living) < 0 ? "" : "amber"
       : "";
     const banner = el("section", `risk-banner ${tone}`.trim());
