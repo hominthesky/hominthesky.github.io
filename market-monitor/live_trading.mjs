@@ -30,6 +30,16 @@ const RISK_SNAPSHOT_FIELDS = [
   "source_label",
   "broker_coverage",
 ];
+const PORTFOLIO_OVERVIEW_FIELDS = [
+  "source_status",
+  "derived_nav_usd",
+  "gross_market_value_usd",
+  "gross_leverage",
+  "gross_leverage_red",
+  "source_retrieved_at",
+  "holdings_as_of",
+  "source_label",
+];
 const SOURCE_FAILURE_STATES = new Set([
   "EXPECTED_LAG",
   "PARTIAL",
@@ -485,6 +495,34 @@ export function applyLiveRiskGate(personal, incoming) {
     strategy: [],
     live_risk_gate_only: true,
   };
+}
+
+function confirmedPortfolioOverviewCandidate(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (String(value.source_status || "").toUpperCase() !== HEALTHY) return null;
+  const nav = value.derived_nav_usd;
+  const gross = value.gross_market_value_usd;
+  const leverage = value.gross_leverage;
+  const retrievedAt = timestamp(value.source_retrieved_at);
+  if (
+    typeof nav !== "number" || !Number.isFinite(nav) || nav <= 0
+    || typeof gross !== "number" || !Number.isFinite(gross) || gross < 0
+    || typeof leverage !== "number" || !Number.isFinite(leverage) || leverage < 0
+    || retrievedAt === null
+  ) {
+    return null;
+  }
+  return Object.fromEntries(PORTFOLIO_OVERVIEW_FIELDS.map((field) => [
+    field,
+    field === "gross_leverage_red"
+      ? (typeof value[field] === "number" && Number.isFinite(value[field]) ? value[field] : null)
+      : (value[field] ?? null),
+  ]));
+}
+
+export function updateLastConfirmedPortfolioOverview(current, incoming) {
+  return confirmedPortfolioOverviewCandidate(incoming)
+    || confirmedPortfolioOverviewCandidate(current);
 }
 
 /** Build a start-of-session target from the settled monthly gap. */

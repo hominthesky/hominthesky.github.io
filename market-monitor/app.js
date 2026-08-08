@@ -20,12 +20,14 @@ import {
   refreshProofMessage,
   resolveTradingCashflow,
   resolvePendingManualRefresh,
+  updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260808-2";
+} from "./live_trading.mjs?v=20260808-3";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
+let portfolioOverviewSummary = null;
 let unlockKey = null;
 let livePollTimer = null;
 let livePollInFlight = null;
@@ -456,8 +458,9 @@ function renderPortfolioOverview() {
   const root = byId("portfolio-overview");
   if (!root || !monitorData) return;
   root.replaceChildren();
-  const summary = monitorData.personal?.summary || {};
-  const portfolioReturn = summary.portfolio_return || {};
+  const riskSummary = monitorData.personal?.summary || {};
+  const summary = portfolioOverviewSummary || {};
+  const portfolioReturn = riskSummary.portfolio_return || {};
   const governedReturn = portfolioReturn.contract_id === PORTFOLIO_RETURN_CONTRACT.id
     && portfolioReturn.formula === PORTFOLIO_RETURN_CONTRACT.formula;
   const cumulative = governedReturn && isFiniteMetric(portfolioReturn.cumulative_total_return)
@@ -491,8 +494,8 @@ function renderPortfolioOverview() {
       "跨券商总净资产",
       usd(summary.derived_nav_usd, true),
       isFiniteMetric(summary.derived_nav_usd)
-        ? `${summary.source_label || "券商账户"} · ${liveTime(summary.source_retrieved_at)}`
-        : `${summary.source_status || "MISSING"} · 覆盖不足不合计`,
+        ? `最近确认 · ${liveTime(summary.source_retrieved_at)}`
+        : "尚无完整券商组合快照",
       { definition: TERM_DEFINITIONS.portfolioNav },
     ),
     overviewMetric(
@@ -565,6 +568,10 @@ function mergeLivePayload(payload) {
   };
   const incomingRiskGate = payload?.personal?.risk_gate;
   if (incomingRiskGate && typeof incomingRiskGate === "object") {
+    portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
+      portfolioOverviewSummary,
+      incomingRiskGate,
+    );
     monitorData.personal = applyLiveRiskGate(monitorData.personal, incomingRiskGate);
     monitorData.meta = {
       ...monitorData.meta,
@@ -2765,6 +2772,10 @@ byId("unlock-form").addEventListener("submit", async (event) => {
   try {
     const unlocked = await decryptPayload(passwordInput.value);
     monitorData = unlocked.data;
+    portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
+      null,
+      monitorData.personal?.summary,
+    );
     unlockKey = unlocked.key;
     passwordInput.value = "";
     renderDashboard();
@@ -2838,6 +2849,7 @@ byId("lock-button").addEventListener("click", () => {
   stopLivePolling();
   unlockKey = null;
   monitorData = null;
+  portfolioOverviewSummary = null;
   liveRuntime.transportStatus = LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING";
   liveRuntime.pollState = LIVE_CLIENT.payloadUrl ? "idle" : "disabled";
   liveRuntime.refreshState = LIVE_CLIENT.refreshUrl ? "idle" : "disabled";
