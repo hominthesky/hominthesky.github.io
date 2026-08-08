@@ -123,6 +123,10 @@ const TERM_DEFINITIONS = {
     "已归类为主动交易的股票完整周期（含日内与隔夜）与期权完整周期扣除可取得交易费用后的净收益，加上税后已入账现金股息。用于衡量策略与股息的现金创造能力；不含融资利息、长期资产出售、本金周转和未实现盈亏。",
   livingExpenseCashflow:
     "现金流创造加上账户实际入账的利息净额。用于评估生活开支覆盖，但不等于券商安全可提现金额；实际提现还受结算现金、保证金安全垫和税务准备金约束。",
+  portfolioNav:
+    "所有已接入券商账户净清算价值的同步合计，包含现金、持仓市值和账户负债。任一预期账户缺失、过期或不同步时不显示确定金额。",
+  portfolioTotalReturn:
+    "跨券商组合净资产变化剔除外部入金和出金后的链式总回报；股息、融资利息、交易费用以及已实现和未实现盈亏均通过净资产自然体现一次。年化值按 ACT/365 折算，不是未来收益预测。",
 };
 
 function el(tag, className, text) {
@@ -410,10 +414,116 @@ function liveAge(ageMs) {
 
 function renderLiveOnly() {
   if (!monitorData || byId("dashboard").hidden) return;
+  renderPortfolioOverview();
   const region = byId("trading-live-region");
   if (!region) return;
   region.replaceChildren(renderLiveTrading(monitorData.trading || {}));
   if (activeView === "personal") renderPersonal();
+}
+
+const PORTFOLIO_RETURN_REASON_LABELS = Object.freeze({
+  HISTORY_EMPTY: "尚无完整日终历史",
+  HISTORY_INVALID: "历史记录未通过校验",
+  HISTORY_ACCUMULATING: "共同历史积累中",
+  MINIMUM_HISTORY_NOT_MET: "满 30 个自然日后显示年化",
+  CALENDAR_UNAVAILABLE: "交易日历不可用",
+  VALUATION_GAP: "日终净资产覆盖有缺口",
+  EXTERNAL_FLOW_COVERAGE_INCOMPLETE: "入出金流水覆盖不完整",
+  INTERNAL_TRANSFER_UNMATCHED: "跨券商划转尚未配对",
+  EXTERNAL_FLOW_FX_MISSING: "资金流水币种无法换算",
+  EXTERNAL_FLOW_INVALID: "资金流水未通过校验",
+  EXTERNAL_FLOW_SIGN_INVALID: "入出金方向未通过校验",
+  RETURN_DENOMINATOR_NON_POSITIVE: "收益率分母无效",
+  RETURN_OUT_OF_DOMAIN: "收益率超出可计算范围",
+});
+
+const PORTFOLIO_RETURN_CONTRACT = Object.freeze({
+  id: "portfolio_total_return_v1",
+  formula: "chain_link((NAV_end - NAV_begin - external_flow) / (NAV_begin + 0.5 * external_flow)); annualized=(1+cumulative)^(365/elapsed_calendar_days)-1",
+});
+
+function overviewMetric(label, value, note, options = {}) {
+  const item = el("div", "portfolio-overview-metric");
+  const labelNode = options.definition
+    ? term(label, options.definition, "portfolio-overview-label")
+    : el("span", "portfolio-overview-label", label);
+  const valueNode = el("strong", `portfolio-overview-value ${options.tone || ""}`.trim(), value);
+  append(item, labelNode, valueNode, el("span", "portfolio-overview-note", note));
+  return item;
+}
+
+function renderPortfolioOverview() {
+  const root = byId("portfolio-overview");
+  if (!root || !monitorData) return;
+  root.replaceChildren();
+  const summary = monitorData.personal?.summary || {};
+  const portfolioReturn = summary.portfolio_return || {};
+  const governedReturn = portfolioReturn.contract_id === PORTFOLIO_RETURN_CONTRACT.id
+    && portfolioReturn.formula === PORTFOLIO_RETURN_CONTRACT.formula;
+  const cumulative = governedReturn && isFiniteMetric(portfolioReturn.cumulative_total_return)
+    ? portfolioReturn.cumulative_total_return
+    : null;
+  const annualized = governedReturn && isFiniteMetric(portfolioReturn.annualized_total_return)
+    ? portfolioReturn.annualized_total_return
+    : null;
+  const reasonCodes = Array.isArray(portfolioReturn.reason_codes)
+    ? portfolioReturn.reason_codes
+    : [];
+  const reason = reasonCodes
+    .map((code) => PORTFOLIO_RETURN_REASON_LABELS[code])
+    .find(Boolean);
+  const returnCoverage = portfolioReturn.start_date
+    ? `${portfolioReturn.start_date} 起`
+    : "共同历史尚未建立";
+  const returnNote = cumulative !== null
+    ? `累计 ${pct(cumulative, 1)} · ${returnCoverage}${annualized === null ? ` · ${reason || "历史积累中"}` : ""}`
+    : `${reason || "共同历史积累中"} · 覆盖不足不估算`;
+  const head = el("div", "portfolio-overview-head");
+  append(
+    head,
+    el("strong", "", "资产增长概览"),
+    el("span", "", "长期组合总回报 · 与下方生活现金流分开"),
+  );
+  const grid = el("div", "portfolio-overview-grid");
+  append(
+    grid,
+    overviewMetric(
+      "跨券商总净资产",
+      usd(summary.derived_nav_usd, true),
+      isFiniteMetric(summary.derived_nav_usd)
+        ? `${summary.source_label || "券商账户"} · ${liveTime(summary.source_retrieved_at)}`
+        : `${summary.source_status || "MISSING"} · 覆盖不足不合计`,
+      { definition: TERM_DEFINITIONS.portfolioNav },
+    ),
+    overviewMetric(
+      "组合年化总回报",
+      annualized === null ? "—" : pct(annualized, 1),
+      returnNote,
+      {
+        definition: TERM_DEFINITIONS.portfolioTotalReturn,
+        tone: annualized === null ? "" : annualized >= 0 ? "positive" : "negative",
+      },
+    ),
+    overviewMetric(
+      "组合毛杠杆",
+      isFiniteMetric(summary.gross_leverage)
+        ? `${number(summary.gross_leverage, 2)}x`
+        : "—",
+      isFiniteMetric(summary.gross_leverage_red)
+        ? `治理红线 ${number(summary.gross_leverage_red, 2)}x`
+        : "覆盖不足不估算",
+      {
+        definition: TERM_DEFINITIONS.grossLeverage,
+        tone:
+          isFiniteMetric(summary.gross_leverage) &&
+          isFiniteMetric(summary.gross_leverage_red) &&
+          summary.gross_leverage >= summary.gross_leverage_red
+            ? "negative"
+            : "",
+      },
+    ),
+  );
+  append(root, head, grid);
 }
 
 function mergeLivePayload(payload) {
@@ -2580,6 +2690,7 @@ function setCurrency(currency) {
   displayCurrency = currency;
   localStorage.setItem("zzao-monitor-currency", currency);
   renderCurrencyControl();
+  renderPortfolioOverview();
   renderPersonal();
   renderMacro();
   renderTrading();
@@ -2636,6 +2747,7 @@ function renderDashboard() {
     ? `· ${failedBrokerSources}`
     : "";
   renderCurrencyControl();
+  renderPortfolioOverview();
   renderPersonal();
   renderMacro();
   renderTrading();

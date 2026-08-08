@@ -334,6 +334,75 @@ input {
   border-bottom: 1px solid var(--line);
 }
 
+.portfolio-overview {
+  margin-bottom: 24px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+}
+
+.portfolio-overview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 16px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.portfolio-overview-head strong {
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+
+.portfolio-overview-head span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.portfolio-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.portfolio-overview-metric {
+  display: grid;
+  grid-column: span 4;
+  align-content: start;
+  min-width: 0;
+  gap: 5px;
+  padding: 14px 16px 15px;
+  border-left: 1px solid var(--line);
+}
+
+.portfolio-overview-metric:first-child {
+  border-left: 0;
+}
+
+.portfolio-overview-label,
+.portfolio-overview-note {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portfolio-overview-value {
+  overflow: hidden;
+  color: var(--text);
+  font-size: clamp(18px, 2vw, 24px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portfolio-overview-value.positive { color: var(--green); }
+.portfolio-overview-value.negative { color: var(--red); }
+
 .fx-line {
   color: var(--cyan);
 }
@@ -493,6 +562,33 @@ input:focus-visible {
 
   .metric-card {
     min-height: auto;
+  }
+
+  .portfolio-overview-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .portfolio-overview-metric {
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 4px 12px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .portfolio-overview-metric:first-child { border-top: 0; }
+
+  .portfolio-overview-value {
+    font-size: 19px;
+    text-align: right;
+  }
+
+  .portfolio-overview-note {
+    grid-column: 1 / -1;
   }
 }
 

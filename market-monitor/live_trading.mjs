@@ -475,7 +475,10 @@ export function applyLiveRiskGate(personal, incoming) {
   }
   return {
     ...current,
-    summary: nextSummary,
+    summary: {
+      ...nextSummary,
+      portfolio_return: current.summary?.portfolio_return,
+    },
     alerts: [],
     actions: [],
     positions: [],
