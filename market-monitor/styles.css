@@ -1467,6 +1467,38 @@ input:focus {
 .trading-chart-summary .positive { color: var(--green); }
 .trading-chart-summary .negative { color: var(--red); }
 
+.trading-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 2px 0 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.trading-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.trading-chart-legend-swatch {
+  display: inline-block;
+  width: 28px;
+  height: 0;
+  border-top: 3px solid var(--cyan);
+}
+
+.trading-chart-legend-swatch.interest {
+  border-color: var(--red);
+  border-top-style: dotted;
+}
+
+.trading-chart-legend-swatch.living {
+  border-color: var(--amber);
+  border-top-style: dashed;
+}
+
 .trading-chart-wrap {
   overflow-x: auto;
   padding: 0 14px 16px;
@@ -1505,6 +1537,23 @@ input:focus {
   stroke-dasharray: 6 4;
 }
 
+.trading-chart-line.interest {
+  stroke: var(--red);
+  stroke-width: 1.35;
+  stroke-dasharray: 2 5;
+  opacity: 0.78;
+}
+
+.trading-chart-series-point {
+  fill: var(--cyan);
+  stroke: var(--card);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.trading-chart-series-point.living { fill: var(--amber); }
+.trading-chart-series-point.interest { fill: var(--red); opacity: 0.78; }
+
 .trading-chart-point {
   stroke: var(--card);
   stroke-width: 1.5;
@@ -1513,6 +1562,7 @@ input:focus {
 
 .trading-chart-point.win { fill: var(--green); }
 .trading-chart-point.loss { fill: var(--red); }
+.trading-chart-point.unknown { fill: var(--muted); }
 
 .trading-chart-point {
   cursor: pointer;

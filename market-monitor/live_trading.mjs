@@ -107,7 +107,262 @@ export function periodDisplayGeneratedCashflow(period, periodComplete = false) {
   const field = periodComplete === true
     ? period?.generated_cashflow
     : period?.confirmed_generated_cashflow;
-  return typeof field === "number" && Number.isFinite(field) ? field : null;
+  return nativeFiniteNumber(field);
+}
+
+const CASHFLOW_CHART_COMPONENTS = [
+  "intraday_net_pnl",
+  "overnight_equity_net_pnl",
+  "option_net_pnl",
+  "dividend_cashflow",
+  "account_interest_cashflow",
+  "fees",
+];
+
+function nativeFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function cashflowChartGeneratedDeclaredComplete(period, sourcesComplete, cadence, yearComplete) {
+  return Boolean(
+    sourcesComplete &&
+    period?.realized_coverage_status === "COMPLETE" &&
+    period?.active_scope_coverage_status === "COMPLETE" &&
+    (period?.dividend_coverage_status ?? period?.passive_cashflow_coverage_status) === "COMPLETE" &&
+    (cadence !== "year" || yearComplete),
+  );
+}
+
+function cashflowChartComponentValues(period, interest) {
+  return Object.fromEntries(CASHFLOW_CHART_COMPONENTS.map((key) => [
+    key,
+    key === "account_interest_cashflow"
+      ? interest
+      : nativeFiniteNumber(period?.[key]),
+  ]));
+}
+
+function cashflowChartDay(period, cadence, sourcesComplete, yearComplete, labels) {
+  const generatedDeclaredComplete = cashflowChartGeneratedDeclaredComplete(
+    period,
+    sourcesComplete,
+    cadence,
+    yearComplete,
+  );
+  const officialGenerated = periodDisplayGeneratedCashflow(period, true);
+  const confirmedGenerated = periodDisplayGeneratedCashflow(period, false);
+  const interestDeclaredComplete =
+    (period?.interest_coverage_status ?? period?.passive_cashflow_coverage_status) === "COMPLETE";
+  const interest = interestDeclaredComplete
+    ? nativeFiniteNumber(period?.account_interest_cashflow)
+    : null;
+  const interestComplete = Boolean(interestDeclaredComplete && interest !== null);
+  const components = cashflowChartComponentValues(period, interest);
+  const generatedComponents = [
+    components.intraday_net_pnl,
+    components.overnight_equity_net_pnl,
+    components.option_net_pnl,
+    components.dividend_cashflow,
+  ];
+  const generatedIdentityValid = generatedComponents.every((value) => value !== null) &&
+    officialGenerated !== null &&
+    Math.abs(officialGenerated - generatedComponents.reduce((sum, value) => sum + value, 0)) < 0.005;
+  const generatedComplete = Boolean(
+    generatedDeclaredComplete &&
+    generatedIdentityValid &&
+    nativeFiniteNumber(period?.fees) !== null,
+  );
+  const generated = generatedComplete ? officialGenerated : confirmedGenerated;
+  const governedLiving = nativeFiniteNumber(period?.living_expense_net_cashflow);
+  const derivedLiving = generated !== null && interest !== null ? generated + interest : null;
+  const governedLivingValid = governedLiving !== null && officialGenerated !== null && interest !== null &&
+    Math.abs(governedLiving - (officialGenerated + interest)) < 0.005;
+  const livingComplete = Boolean(generatedComplete && interestComplete && governedLivingValid);
+  const living = livingComplete
+    ? governedLiving
+    : generatedComplete && interestComplete
+      ? null
+      : derivedLiving;
+  return {
+    ...labels,
+    value: generated,
+    interestValue: interest,
+    livingValue: living,
+    ...components,
+    generatedComplete,
+    interestComplete,
+    livingComplete,
+    coverageComplete: livingComplete,
+  };
+}
+
+function cashflowChartGroupKey(day, cadence) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ""))) return "";
+  if (cadence !== "week") return day.slice(0, 7);
+  const date = new Date(`${day}T00:00:00Z`);
+  const monday = new Date(date);
+  monday.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+  return monday.toISOString().slice(0, 10);
+}
+
+function cashflowChartGroupKeys(firstKey, lastKey, cadence) {
+  if (!firstKey || !lastKey) return [];
+  const keys = [];
+  const cursor = new Date(`${firstKey}${cadence === "week" ? "" : "-01"}T00:00:00Z`);
+  const end = new Date(`${lastKey}${cadence === "week" ? "" : "-01"}T00:00:00Z`);
+  while (cursor <= end) {
+    keys.push(cadence === "week"
+      ? cursor.toISOString().slice(0, 10)
+      : cursor.toISOString().slice(0, 7));
+    if (cadence === "week") cursor.setUTCDate(cursor.getUTCDate() + 7);
+    else cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  return keys;
+}
+
+function emptyCashflowChartGroup() {
+  return {
+    hasRows: false,
+    value: 0,
+    interestValue: 0,
+    livingValue: 0,
+    valueKnown: true,
+    interestKnown: true,
+    livingKnown: true,
+    generatedComplete: true,
+    interestComplete: true,
+    livingComplete: true,
+    components: Object.fromEntries(CASHFLOW_CHART_COMPONENTS.map((key) => [key, {
+      value: 0,
+      known: true,
+    }])),
+  };
+}
+
+/**
+ * Build chart rows without allowing one unknown financial series to delete a
+ * date or calendar bucket. Complete periods use governed totals; incomplete
+ * periods use only explicit confirmed subtotals. Booked interest remains
+ * independently visible when realized or strategy-scope coverage is partial.
+ */
+export function buildCashflowChartSeries(
+  rows,
+  cadence,
+  {
+    yearPeriod = null,
+    yearComplete = false,
+    sourcesComplete = false,
+    scopeStart = null,
+    scopeEnd = null,
+  } = {},
+) {
+  if (!new Set(["day", "week", "month", "year"]).has(cadence)) return [];
+  if (cadence === "year" && yearPeriod?.coverage_status === "UNKNOWN") return [];
+  const scopedRows = cadence === "year"
+    ? rowsWithinYearCoverage(rows, yearPeriod)
+    : [...(rows || [])];
+  const ordered = scopedRows
+    .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(String(row?.date || "")))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  if (cadence === "day") {
+    return ordered.slice(-30).map((row) => cashflowChartDay(
+      row,
+      cadence,
+      sourcesComplete,
+      yearComplete,
+      { label: row.date.slice(5), fullLabel: row.date },
+    ));
+  }
+
+  const groups = new Map();
+  ordered.forEach((row) => {
+    const key = cashflowChartGroupKey(row.date, cadence);
+    const group = groups.get(key) || emptyCashflowChartGroup();
+    const point = cashflowChartDay(row, cadence, sourcesComplete, yearComplete, {});
+    group.hasRows = true;
+    for (const [valueKey, knownKey] of [
+      ["value", "valueKnown"],
+      ["interestValue", "interestKnown"],
+      ["livingValue", "livingKnown"],
+    ]) {
+      if (point[valueKey] === null) group[knownKey] = false;
+      else group[valueKey] += point[valueKey];
+    }
+    CASHFLOW_CHART_COMPONENTS.forEach((component) => {
+      if (point[component] === null) group.components[component].known = false;
+      else group.components[component].value += point[component];
+    });
+    group.generatedComplete = group.generatedComplete && point.generatedComplete;
+    group.interestComplete = group.interestComplete && point.interestComplete;
+    group.livingComplete = group.livingComplete && point.livingComplete;
+    groups.set(key, group);
+  });
+
+  const existingKeys = [...groups.keys()].sort();
+  const scopedFirstKey = cashflowChartGroupKey(
+    cadence === "year" ? yearPeriod?.start_date : scopeStart,
+    cadence,
+  );
+  const scopedLastKey = cashflowChartGroupKey(
+    cadence === "year" ? yearPeriod?.end_date : scopeEnd,
+    cadence,
+  );
+  const keys = cashflowChartGroupKeys(
+    scopedFirstKey || existingKeys[0],
+    scopedLastKey || existingKeys.at(-1),
+    cadence,
+  );
+  let series = keys.map((key) => {
+    const group = groups.get(key);
+    const hasRows = Boolean(group?.hasRows);
+    return {
+      label: cadence === "week" ? key.slice(5) : key,
+      fullLabel: cadence === "week" ? `周起始 ${key}` : key,
+      value: hasRows && group.valueKnown ? group.value : null,
+      interestValue: hasRows && group.interestKnown ? group.interestValue : null,
+      livingValue: hasRows && group.livingKnown ? group.livingValue : null,
+      ...Object.fromEntries(CASHFLOW_CHART_COMPONENTS.map((component) => [
+        component,
+        hasRows && group.components[component].known
+          ? group.components[component].value
+          : null,
+      ])),
+      generatedComplete: Boolean(hasRows && group.generatedComplete),
+      interestComplete: Boolean(hasRows && group.interestComplete),
+      livingComplete: Boolean(hasRows && group.livingComplete),
+      coverageComplete: Boolean(hasRows && group.livingComplete),
+    };
+  });
+  if (cadence === "week") return series.slice(-16);
+  if (cadence === "month") return series.slice(-12);
+
+  const cumulative = {
+    value: 0,
+    interestValue: 0,
+    livingValue: 0,
+    ...Object.fromEntries(CASHFLOW_CHART_COMPONENTS.map((component) => [component, 0])),
+  };
+  const cumulativeComplete = {
+    generatedComplete: true,
+    interestComplete: true,
+    livingComplete: true,
+  };
+  return series.map((row) => {
+    Object.keys(cumulative).forEach((key) => {
+      if (cumulative[key] !== null && row[key] !== null) cumulative[key] += row[key];
+      else cumulative[key] = null;
+    });
+    Object.keys(cumulativeComplete).forEach((key) => {
+      cumulativeComplete[key] = cumulativeComplete[key] && row[key];
+    });
+    return {
+      ...row,
+      ...cumulative,
+      ...cumulativeComplete,
+      coverageComplete: cumulativeComplete.livingComplete,
+      fullLabel: `${row.fullLabel} ${yearSeriesScope(yearPeriod, yearComplete) || ""}`.trim(),
+    };
+  });
 }
 
 export function yearSeriesScope(period, overallComplete) {

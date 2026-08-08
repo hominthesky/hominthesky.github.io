@@ -6,6 +6,7 @@ import {
   MANUAL_REFRESH_TIMEOUT_MS,
   applyLiveRiskGate,
   assessLiveTradingSignal,
+  buildCashflowChartSeries,
   calculateDailyTarget,
   calculateLivingExpenseCoverage,
   combineHealthStatuses,
@@ -19,10 +20,9 @@ import {
   refreshProofMessage,
   resolveTradingCashflow,
   resolvePendingManualRefresh,
-  rowsWithinYearCoverage,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260808-1";
+} from "./live_trading.mjs?v=20260808-2";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -1505,152 +1505,21 @@ function renderTradingPerformance(trading, portfolioSummary) {
   return card;
 }
 
-function chartCashflowValues(row) {
-  const generated = periodGeneratedCashflow(row);
-  const interest = periodAccountInterest(row);
-  const living = periodLivingExpenseCashflow(row);
-  return { generated, interest, living };
-}
-
-function tradingChartSeries(rows, cadence, yearPeriod = null, yearComplete = false, sourcesComplete = false) {
-  if (cadence === "year" && yearPeriod?.coverage_status === "UNKNOWN") return [];
-  const components = [
-    "intraday_net_pnl",
-    "option_net_pnl",
-    "dividend_cashflow",
-    "account_interest_cashflow",
-    "fees",
-  ];
-  const normalized = (row, labels = {}) => {
-    const values = chartCashflowValues(row);
-    return {
-      ...labels,
-      value: values.generated,
-      livingValue: values.living,
-      ...Object.fromEntries(components.map((key) => [
-        key,
-        key === "account_interest_cashflow"
-          ? values.interest
-          : isFiniteMetric(row[key]) ? Number(row[key]) : null,
-      ])),
-      coverageComplete: Boolean(
-      sourcesComplete &&
-      row.realized_coverage_status === "COMPLETE" &&
-      row.active_scope_coverage_status === "COMPLETE" &&
-      (row.dividend_coverage_status ?? row.passive_cashflow_coverage_status) === "COMPLETE" &&
-      (row.interest_coverage_status ?? row.passive_cashflow_coverage_status) === "COMPLETE" &&
-      (cadence === "year" ? yearComplete : true),
-      ),
-    };
-  };
-  const scopedRows = cadence === "year" ? rowsWithinYearCoverage(rows, yearPeriod) : [...(rows || [])];
-  const ordered = scopedRows
-    .filter((row) => row.date)
-    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  if (cadence === "day") {
-    return ordered
-      .filter((row) => isFiniteMetric(chartCashflowValues(row).generated))
-      .slice(-30)
-      .map((row) => normalized(row, { label: row.date.slice(5), fullLabel: row.date }));
-  }
-  const groups = new Map();
-  ordered.forEach((row) => {
-    const date = new Date(`${row.date}T00:00:00Z`);
-    let key;
-    if (cadence === "week") {
-      const monday = new Date(date);
-      monday.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
-      key = monday.toISOString().slice(0, 10);
-    } else {
-      key = row.date.slice(0, 7);
-    }
-    const group = groups.get(key) || {
-      generated_cashflow: 0,
-      living_expense_net_cashflow: 0,
-      ...Object.fromEntries(components.map((component) => [component, 0])),
-      coverageComplete: true,
-      generatedKnown: true,
-      componentsKnown: true,
-      livingKnown: true,
-    };
-    const cashflow = chartCashflowValues(row);
-    if (isFiniteMetric(cashflow.generated)) group.generated_cashflow += Number(cashflow.generated);
-    else group.generatedKnown = false;
-    if (isFiniteMetric(cashflow.living)) group.living_expense_net_cashflow += Number(cashflow.living);
-    else group.livingKnown = false;
-    components.forEach((component) => {
-      const value = component === "account_interest_cashflow"
-        ? cashflow.interest
-        : row[component];
-      if (isFiniteMetric(value)) group[component] += Number(value);
-      else group.componentsKnown = false;
-    });
-    group.coverageComplete = group.coverageComplete &&
-      row.realized_coverage_status === "COMPLETE" &&
-      row.active_scope_coverage_status === "COMPLETE" &&
-      (row.dividend_coverage_status ?? row.passive_cashflow_coverage_status) === "COMPLETE" &&
-      (row.interest_coverage_status ?? row.passive_cashflow_coverage_status) === "COMPLETE";
-    groups.set(key, group);
-  });
-  let series = [...groups.entries()].map(([key, row]) => {
-    const normalizedRow = normalized({
-      ...row,
-      realized_coverage_status: row.generatedKnown ? "COMPLETE" : "UNKNOWN",
-      dividend_coverage_status: row.generatedKnown ? "COMPLETE" : "UNKNOWN",
-      interest_coverage_status: row.livingKnown ? "COMPLETE" : "UNKNOWN",
-      living_expense_net_cashflow: row.livingKnown
-        ? row.living_expense_net_cashflow
-        : null,
-      investable_cashflow: null,
-    }, {
-      label: cadence === "week" ? key.slice(5) : key,
-      fullLabel: cadence === "week" ? `周起始 ${key}` : key,
-    });
-    return {
-      ...normalizedRow,
-      coverageComplete: Boolean(
-        sourcesComplete && row.coverageComplete && row.componentsKnown &&
-        (cadence === "year" ? yearComplete : true),
-      ),
-    };
-  });
-  if (cadence === "week") return series.filter((row) => isFiniteMetric(row.value)).slice(-16);
-  if (cadence === "month") return series.filter((row) => isFiniteMetric(row.value)).slice(-12);
-  const latestYear = series.at(-1)?.label.slice(0, 4);
-  series = series.filter((row) => row.label.startsWith(latestYear));
-  const cumulative = {
-    value: 0,
-    livingValue: 0,
-    ...Object.fromEntries(components.map((component) => [component, 0])),
-  };
-  return series.map((row) => {
-    Object.keys(cumulative).forEach((key) => {
-      if (isFiniteMetric(cumulative[key]) && isFiniteMetric(row[key])) {
-        cumulative[key] += Number(row[key]);
-      } else {
-        cumulative[key] = null;
-      }
-    });
-    const scope = yearSeriesScope(yearPeriod, yearComplete);
-    return { ...row, ...cumulative, fullLabel: `${row.fullLabel} ${scope}` };
-  }).filter((row) => isFiniteMetric(row.value));
-}
-
 function renderTradingCashflowChart(trading) {
   const yearPeriod = (trading.periods || []).find((period) => period.cadence === "year");
   const yearComplete = Boolean(yearPeriod && settledPeriodComplete(trading, yearPeriod));
   const yearScope = yearSeriesScope(yearPeriod, yearComplete);
   const descriptions = {
-    day: "最近30个有记录的美东监控日；实线为现金流创造，辅线为扣除账户利息后的生活开支评估净现金流。",
-    week: "最近16周；按周汇总现金流创造，并单列长期持仓融资对生活现金的影响。",
-    month: "最近12个月；按月比较现金流创造与生活开支评估净现金流。",
+    day: "最近30个有记录的美东监控日；分别显示现金流创造、已入账融资/利息与生活净额，部分覆盖保留可确认小计。",
+    week: "最近16周；按周保留时间桶，分别汇总现金流创造、已入账融资/利息与生活净额。",
+    month: "最近12个月；月份不会因局部未知而消失，缺失只形成对应序列断点。",
     year: yearPeriod?.coverage_status === "PARTIAL"
       ? yearPeriod.coverage_reason
       : yearPeriod?.coverage_status === "UNKNOWN"
         ? "共同历史覆盖起点未知，不生成确定性年内累计。"
         : yearComplete
-          ? "本年度按月累计现金流创造与生活开支评估净现金流"
-          : "自然年历史存在，但 realized、券商来源、股息或利息覆盖不完整；以下仅为年内可确认金额。",
+          ? "本年度按月累计现金流创造、已入账融资/利息与生活开支评估净现金流"
+          : "自然年历史存在，但 realized、策略归类、券商来源、股息或利息覆盖不完整；以下仅为年内可确认金额。",
   };
   const card = section("现金流创造与生活开支趋势", descriptions[tradingChartCadence]);
   const controls = el("div", "chart-cadence-control");
@@ -1669,12 +1538,16 @@ function renderTradingCashflowChart(trading) {
   );
   card.querySelector(".section-head").appendChild(controls);
 
-  const series = tradingChartSeries(
+  const series = buildCashflowChartSeries(
     trading.daily,
     tradingChartCadence,
-    yearPeriod,
-    yearComplete,
-    tradingSourcesComplete(trading),
+    {
+      yearPeriod,
+      yearComplete,
+      sourcesComplete: tradingSourcesComplete(trading),
+      scopeStart: yearPeriod?.start_date || null,
+      scopeEnd: yearPeriod?.end_date || null,
+    },
   );
   if (!series.length) {
     card.appendChild(el(
@@ -1689,13 +1562,34 @@ function renderTradingCashflowChart(trading) {
 
   const latest = series.at(-1);
   const summary = el("div", "trading-chart-summary");
+  const generatedLabel = latest.generatedComplete ? "创造" : "可确认创造";
+  const livingLabel = latest.livingComplete ? "生活净额" : "可确认生活净额";
+  const metricTone = (value) => isFiniteMetric(value)
+    ? Number(value) < 0 ? "negative" : "positive"
+    : "";
   append(
     summary,
     el("span", "", latest.fullLabel),
-    el("strong", Number(latest.value) < 0 ? "negative" : "positive", `创造 ${usd(latest.value)}`),
-    el("strong", Number(latest.livingValue) < 0 ? "negative" : "", `生活净额 ${usd(latest.livingValue)}`),
+    el("strong", metricTone(latest.value), `${generatedLabel} ${usd(latest.value)}`),
+    el("strong", metricTone(latest.interestValue), `融资/利息 ${usd(latest.interestValue)}`),
+    el("strong", metricTone(latest.livingValue), `${livingLabel} ${usd(latest.livingValue)}`),
   );
   card.appendChild(summary);
+  const legend = el("div", "trading-chart-legend");
+  [
+    ["generated", "实线", "现金流创造"],
+    ["interest", "点线", "融资 / 利息"],
+    ["living", "虚线", "生活净额"],
+  ].forEach(([className, shape, label]) => {
+    const item = el("span", "trading-chart-legend-item");
+    append(
+      item,
+      el("i", `trading-chart-legend-swatch ${className}`, ""),
+      el("span", "", `${label}（${shape}）`),
+    );
+    legend.appendChild(item);
+  });
+  card.appendChild(legend);
 
   const width = 820;
   const height = 250;
@@ -1704,7 +1598,7 @@ function renderTradingCashflowChart(trading) {
   const top = 18;
   const bottom = 215;
   const values = series.flatMap((row) =>
-    [row.value, row.livingValue].filter(isFiniteMetric).map(Number),
+    [row.value, row.interestValue, row.livingValue].filter(isFiniteMetric).map(Number),
   );
   let minimum = Math.min(0, ...values);
   let maximum = Math.max(0, ...values);
@@ -1758,18 +1652,19 @@ function renderTradingCashflowChart(trading) {
     const total = el("div", "trading-chart-tooltip-total");
     append(
       total,
-      el("span", "", row.coverageComplete ? "现金流创造" : "可确认现金流创造"),
-      el("strong", Number(row.value) < 0 ? "negative" : "positive", usd(row.value)),
+      el("span", "", row.generatedComplete ? "现金流创造" : "可确认现金流创造"),
+      el("strong", metricTone(row.value), usd(row.value)),
     );
     const livingTotal = el("div", "trading-chart-tooltip-total secondary");
     append(
       livingTotal,
-      el("span", "", "生活开支评估净现金流"),
-      el("strong", Number(row.livingValue) < 0 ? "negative" : "positive", usd(row.livingValue)),
+      el("span", "", row.livingComplete ? "生活开支评估净现金流" : "可确认生活净额"),
+      el("strong", metricTone(row.livingValue), usd(row.livingValue)),
     );
     const details = el("div", "trading-chart-tooltip-details");
     [
       ["股票日内净入账", row.intraday_net_pnl],
+      ["已归类隔夜净入账", row.overnight_equity_net_pnl],
       ["期权净入账", row.option_net_pnl],
       ["税后股息", row.dividend_cashflow],
       ["长期持仓融资 / 其他利息", row.account_interest_cashflow],
@@ -1801,7 +1696,7 @@ function renderTradingCashflowChart(trading) {
   svg.setAttribute("class", "trading-cashflow-chart");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.setAttribute("role", "group");
-  svg.setAttribute("aria-label", `${yearScope || "现金流"}${descriptions[tradingChartCadence]}双折线图`);
+  svg.setAttribute("aria-label", `${yearScope || "现金流"}${descriptions[tradingChartCadence]}趋势图`);
 
   [maximum, 0, minimum].forEach((value) => {
     const line = document.createElementNS(svg.namespaceURI, "line");
@@ -1820,23 +1715,37 @@ function renderTradingCashflowChart(trading) {
     svg.appendChild(label);
   });
 
-  const polyline = document.createElementNS(svg.namespaceURI, "polyline");
-  polyline.setAttribute(
-    "points",
-    series.map((row, index) => `${x(index)},${y(row.value)}`).join(" "),
-  );
-  polyline.setAttribute("class", "trading-chart-line");
-  svg.appendChild(polyline);
-
-  if (series.every((row) => isFiniteMetric(row.livingValue))) {
-    const livingPolyline = document.createElementNS(svg.namespaceURI, "polyline");
-    livingPolyline.setAttribute(
-      "points",
-      series.map((row, index) => `${x(index)},${y(row.livingValue)}`).join(" "),
-    );
-    livingPolyline.setAttribute("class", "trading-chart-line living");
-    svg.appendChild(livingPolyline);
-  }
+  const appendSeriesSegments = (valueKey, className) => {
+    let segment = [];
+    const flush = () => {
+      if (!segment.length) return;
+      if (segment.length === 1) {
+        const marker = document.createElementNS(svg.namespaceURI, "circle");
+        marker.setAttribute("cx", String(segment[0][0]));
+        marker.setAttribute("cy", String(segment[0][1]));
+        marker.setAttribute("r", "2.25");
+        marker.setAttribute("class", `trading-chart-series-point ${className}`.trim());
+        svg.appendChild(marker);
+      } else {
+        const line = document.createElementNS(svg.namespaceURI, "polyline");
+        line.setAttribute("points", segment.map((point) => point.join(",")).join(" "));
+        line.setAttribute("class", `trading-chart-line ${className}`.trim());
+        svg.appendChild(line);
+      }
+      segment = [];
+    };
+    series.forEach((row, index) => {
+      if (!isFiniteMetric(row[valueKey])) {
+        flush();
+        return;
+      }
+      segment.push([x(index), y(row[valueKey])]);
+    });
+    flush();
+  };
+  appendSeriesSegments("value", "generated");
+  appendSeriesSegments("interestValue", "interest");
+  appendSeriesSegments("livingValue", "living");
 
   guideLine = document.createElementNS(svg.namespaceURI, "line");
   guideLine.setAttribute("y1", String(top));
@@ -1846,24 +1755,28 @@ function renderTradingCashflowChart(trading) {
   svg.appendChild(guideLine);
 
   const points = series.map((row, index) => {
+    const anchorValue = [row.value, row.livingValue, row.interestValue].find(isFiniteMetric);
+    if (!isFiniteMetric(anchorValue)) return null;
     const point = document.createElementNS(svg.namespaceURI, "circle");
     point.setAttribute("cx", String(x(index)));
-    point.setAttribute("cy", String(y(row.value)));
+    point.setAttribute("cy", String(y(anchorValue)));
     point.setAttribute("r", "3.5");
     point.setAttribute("tabindex", "0");
     point.setAttribute("role", "button");
     point.setAttribute(
       "aria-label",
-      `${row.fullLabel}，${row.coverageComplete ? "现金流创造" : "可确认现金流创造"} ${usd(row.value)}，` +
-      `生活开支评估净现金流 ${usd(row.livingValue)}，` +
-      `股票 ${usd(row.intraday_net_pnl)}，期权 ${usd(row.option_net_pnl)}，` +
+      `${row.fullLabel}，${row.generatedComplete ? "现金流创造" : "可确认现金流创造"} ${usd(row.value)}，` +
+      `${row.livingComplete ? "生活开支评估净现金流" : "可确认生活净额"} ${usd(row.livingValue)}，` +
+      `股票日内 ${usd(row.intraday_net_pnl)}，已归类隔夜 ${usd(row.overnight_equity_net_pnl)}，期权 ${usd(row.option_net_pnl)}，` +
       `税后股息 ${usd(row.dividend_cashflow)}，利息 ${usd(row.account_interest_cashflow)}，` +
       `手续费 ${usd(negativeMetric(row.fees))}`,
     );
     point.setAttribute("aria-describedby", tooltip.id);
-    point.setAttribute("class", Number(row.value) < 0 ? "trading-chart-point loss" : "trading-chart-point win");
+    point.setAttribute("class", !isFiniteMetric(row.value)
+      ? "trading-chart-point unknown"
+      : Number(row.value) < 0 ? "trading-chart-point loss" : "trading-chart-point win");
     const title = document.createElementNS(svg.namespaceURI, "title");
-    title.textContent = `${row.fullLabel}：创造 ${usd(row.value)}；生活净额 ${usd(row.livingValue)}`;
+    title.textContent = `${row.fullLabel}：${row.generatedComplete ? "创造" : "可确认创造"} ${usd(row.value)}；融资/利息 ${usd(row.interestValue)}；${row.livingComplete ? "生活净额" : "可确认生活净额"} ${usd(row.livingValue)}`;
     point.appendChild(title);
     svg.appendChild(point);
     return point;
@@ -1884,6 +1797,7 @@ function renderTradingCashflowChart(trading) {
   };
 
   points.forEach((point, index) => {
+    if (!point) return;
     point.addEventListener("focus", () => activatePoint(index));
     point.addEventListener("blur", () => {
       if (!pinnedPoint) {
@@ -1926,12 +1840,19 @@ function renderTradingCashflowChart(trading) {
       const bounds = svg.getBoundingClientRect();
       localX = ((event.clientX - bounds.left) / bounds.width) * width;
     }
-    if (series.length === 1) return 0;
+    if (series.length === 1) return points[0] ? 0 : -1;
     const ratio = (localX - left) / (width - left - right);
-    return Math.max(0, Math.min(series.length - 1, Math.round(ratio * (series.length - 1))));
+    const candidate = Math.max(0, Math.min(series.length - 1, Math.round(ratio * (series.length - 1))));
+    return points.reduce((nearest, point, index) => {
+      if (!point) return nearest;
+      return nearest < 0 || Math.abs(index - candidate) < Math.abs(nearest - candidate)
+        ? index
+        : nearest;
+    }, -1);
   };
   hitArea.addEventListener("pointermove", (event) => {
-    if (!pinnedPoint) activatePoint(nearestPointIndex(event));
+    const index = nearestPointIndex(event);
+    if (!pinnedPoint && index >= 0) activatePoint(index);
   });
   hitArea.addEventListener("pointerleave", () => {
     if (!pinnedPoint) {
@@ -1940,7 +1861,8 @@ function renderTradingCashflowChart(trading) {
     }
   });
   hitArea.addEventListener("click", (event) => {
-    activatePoint(nearestPointIndex(event), true);
+    const index = nearestPointIndex(event);
+    if (index >= 0) activatePoint(index, true);
   });
   svg.appendChild(hitArea);
   wrap.appendChild(svg);
