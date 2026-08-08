@@ -1125,7 +1125,7 @@ function cadenceLabel(value, period = null) {
   if (value === "year") {
     return yearCoverageLabel(period?.coverage_status);
   }
-  return { day: "本日", week: "本周", month: "本月" }[value] || value;
+  return { day: "最近完整交易日", week: "本周", month: "本月" }[value] || value;
 }
 
 function tradingSourcesComplete(trading) {
@@ -1562,17 +1562,32 @@ function renderTradingCashflowChart(trading) {
 
   const latest = series.at(-1);
   const summary = el("div", "trading-chart-summary");
-  const generatedLabel = latest.generatedComplete ? "创造" : "可确认创造";
+  const generatedLabel = latest.generatedComplete ? "现金流创造" : "可确认现金流创造";
   const livingLabel = latest.livingComplete ? "生活净额" : "可确认生活净额";
   const metricTone = (value) => isFiniteMetric(value)
     ? Number(value) < 0 ? "negative" : "positive"
     : "";
+  const summaryItem = (label, value) => {
+    const item = el("div", "trading-chart-summary-item");
+    append(
+      item,
+      el("span", "", label),
+      el("strong", metricTone(value), usd(value)),
+    );
+    return item;
+  };
+  const periodSummary = el("div", "trading-chart-summary-period");
+  append(
+    periodSummary,
+    el("span", "", "当前时间桶"),
+    el("strong", "", latest.fullLabel),
+  );
   append(
     summary,
-    el("span", "", latest.fullLabel),
-    el("strong", metricTone(latest.value), `${generatedLabel} ${usd(latest.value)}`),
-    el("strong", metricTone(latest.interestValue), `融资/利息 ${usd(latest.interestValue)}`),
-    el("strong", metricTone(latest.livingValue), `${livingLabel} ${usd(latest.livingValue)}`),
+    periodSummary,
+    summaryItem(generatedLabel, latest.value),
+    summaryItem("融资 / 利息", latest.interestValue),
+    summaryItem(livingLabel, latest.livingValue),
   );
   card.appendChild(summary);
   const legend = el("div", "trading-chart-legend");
@@ -1937,6 +1952,43 @@ function livePreferenceField({ id, label, value, placeholder, storageKey, suffix
 
 function renderLiveTrading(trading) {
   const live = trading.live || null;
+  const noActiveSession = live?.data_status === "NO_ACTIVE_SESSION";
+  if (noActiveSession) {
+    const sources = Array.isArray(live?.sources) ? live.sources : [];
+    const sourceIssues = sources.length
+      ? sources.filter((source) => String(source?.status || "MISSING").toUpperCase() !== "OK").length
+      : 1;
+    const card = el(
+      "section",
+      `live-trading-card live-trading-card-closed tone-${sourceIssues ? "amber" : "green"}`,
+    );
+    const summary = el("div", "live-closed-summary");
+    const copy = el("div", "live-closed-copy");
+    append(
+      copy,
+      el("p", "eyebrow", "MARKET · CLOSED"),
+      el("h2", "", "当前为非交易日"),
+      el("p", "live-trading-window", "无当日交易窗口；盘中现金流、风控节奏与目标设置将在下一交易日自动恢复。"),
+    );
+    const health = el("div", "live-closed-health");
+    const indicators = el("span", "live-status-indicators");
+    if (sources.length) sources.forEach((source) => indicators.appendChild(liveBrokerIndicator(source)));
+    else indicators.appendChild(liveBrokerIndicator(null));
+    append(
+      health,
+      indicators,
+      el(
+        "span",
+        `live-closed-meta ${sourceIssues ? "warning" : ""}`.trim(),
+        sourceIssues
+          ? `${sourceIssues} 个来源待核对 · 最近检查 ${liveTime(live?.checked_at)}`
+          : `券商连接正常 · 最近检查 ${liveTime(live?.checked_at)}`,
+      ),
+    );
+    append(summary, copy, health);
+    card.appendChild(summary);
+    return card;
+  }
   const target = liveTarget(trading);
   const signal = liveSignal(trading);
   const financial = liveFinancialComplete({
