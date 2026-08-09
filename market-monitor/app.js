@@ -23,7 +23,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260808-3";
+} from "./live_trading.mjs?v=20260809-1";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -451,6 +451,20 @@ function overviewMetric(label, value, note, options = {}) {
     : el("span", "portfolio-overview-label", label);
   const valueNode = el("strong", `portfolio-overview-value ${options.tone || ""}`.trim(), value);
   append(item, labelNode, valueNode, el("span", "portfolio-overview-note", note));
+  if (Array.isArray(options.details) && options.details.length) {
+    const details = el("div", "portfolio-overview-details");
+    options.details.forEach(({ label: detailLabel, value: detailValue, note: detailNote }) => {
+      const row = el("div", "portfolio-overview-detail");
+      append(
+        row,
+        el("span", "portfolio-overview-detail-label", detailLabel),
+        el("strong", "portfolio-overview-detail-value", detailValue),
+        detailNote ? el("span", "portfolio-overview-detail-note", detailNote) : null,
+      );
+      details.append(row);
+    });
+    item.append(details);
+  }
   return item;
 }
 
@@ -460,6 +474,11 @@ function renderPortfolioOverview() {
   root.replaceChildren();
   const riskSummary = monitorData.personal?.summary || {};
   const summary = portfolioOverviewSummary || {};
+  const brokerRows = Array.isArray(summary.broker_breakdown)
+    ? summary.broker_breakdown.filter((row) => ["Futu", "Tiger"].includes(row?.broker))
+    : [];
+  const brokerByName = new Map(brokerRows.map((row) => [row.broker, row]));
+  const orderedBrokers = ["Futu", "Tiger"].map((broker) => brokerByName.get(broker)).filter(Boolean);
   const portfolioReturn = riskSummary.portfolio_return || {};
   const governedReturn = portfolioReturn.contract_id === PORTFOLIO_RETURN_CONTRACT.id
     && portfolioReturn.formula === PORTFOLIO_RETURN_CONTRACT.formula;
@@ -496,7 +515,10 @@ function renderPortfolioOverview() {
       isFiniteMetric(summary.derived_nav_usd)
         ? `最近确认 · ${liveTime(summary.source_retrieved_at)}`
         : "尚无完整券商组合快照",
-      { definition: TERM_DEFINITIONS.portfolioNav },
+      {
+        definition: TERM_DEFINITIONS.portfolioNav,
+        details: orderedBrokers.map((row) => ({ label: row.broker, value: usd(row.derived_nav_usd, true) })),
+      },
     ),
     overviewMetric(
       "组合年化总回报",
@@ -505,6 +527,22 @@ function renderPortfolioOverview() {
       {
         definition: TERM_DEFINITIONS.portfolioTotalReturn,
         tone: annualized === null ? "" : annualized >= 0 ? "positive" : "negative",
+        details: orderedBrokers.map((row) => {
+          const native = row.native_return || {};
+          const nativeAnnualized = isFiniteMetric(native.annualized_total_return)
+            ? native.annualized_total_return : null;
+          return nativeAnnualized === null
+            ? {
+                label: row.broker,
+                value: "—",
+                note: row.broker === "Futu" ? "OpenAPI 未开放历史资产回报" : "券商原生历史不可用",
+              }
+            : {
+                label: row.broker,
+                value: pct(nativeAnnualized, 1),
+                note: `证券账户（SEC）原生 · 累计 ${pct(native.cumulative_total_return, 1)} · ${native.end_date || "—"}`,
+              };
+        }),
       },
     ),
     overviewMetric(
@@ -523,6 +561,10 @@ function renderPortfolioOverview() {
           summary.gross_leverage >= summary.gross_leverage_red
             ? "negative"
             : "",
+        details: orderedBrokers.map((row) => ({
+          label: row.broker,
+          value: isFiniteMetric(row.gross_leverage) ? `${number(row.gross_leverage, 2)}x` : "—",
+        })),
       },
     ),
   );

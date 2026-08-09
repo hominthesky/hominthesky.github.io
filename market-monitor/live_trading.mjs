@@ -39,6 +39,7 @@ const PORTFOLIO_OVERVIEW_FIELDS = [
   "source_retrieved_at",
   "holdings_as_of",
   "source_label",
+  "broker_breakdown",
 ];
 const SOURCE_FAILURE_STATES = new Set([
   "EXPECTED_LAG",
@@ -512,12 +513,80 @@ function confirmedPortfolioOverviewCandidate(value) {
   ) {
     return null;
   }
-  return Object.fromEntries(PORTFOLIO_OVERVIEW_FIELDS.map((field) => [
+  const breakdown = Array.isArray(value.broker_breakdown) ? value.broker_breakdown : [];
+  const seen = new Set();
+  const safeBreakdown = breakdown.map((row) => {
+    const broker = String(row?.broker || "");
+    if (!["Futu", "Tiger", "IBKR"].includes(broker) || seen.has(broker)) return null;
+    seen.add(broker);
+    const rowNav = nativeFiniteNumber(row?.derived_nav_usd);
+    const rowGross = nativeFiniteNumber(row?.gross_market_value_usd);
+    const rowLeverage = nativeFiniteNumber(row?.gross_leverage);
+    if (row?.source_status !== "OK" || rowNav === null || rowNav <= 0
+      || rowGross === null || rowGross < 0 || rowLeverage === null || rowLeverage < 0) return null;
+    const native = row?.native_return && typeof row.native_return === "object"
+      ? row.native_return : {};
+    const nativeComplete = native.coverage_status === "COMPLETE"
+      && native.method === "BROKER_NATIVE"
+      && native.scope === "SEC"
+      && nativeFiniteNumber(native.annualized_total_return) !== null
+      && nativeFiniteNumber(native.cumulative_total_return) !== null
+      && typeof native.observation_count === "number"
+      && Number.isInteger(native.observation_count)
+      && native.observation_count > 0
+      && /^\d{4}-\d{2}-\d{2}$/.test(String(native.start_date || ""))
+      && /^\d{4}-\d{2}-\d{2}$/.test(String(native.end_date || ""))
+      && native.start_date <= native.end_date;
+    return {
+      broker,
+      source_status: "OK",
+      derived_nav_usd: rowNav,
+      gross_market_value_usd: rowGross,
+      gross_leverage: rowLeverage,
+      source_retrieved_at: row.source_retrieved_at ?? null,
+      native_return: nativeComplete ? {
+        coverage_status: "COMPLETE",
+        method: "BROKER_NATIVE",
+        scope: "SEC",
+        start_date: native.start_date ?? null,
+        end_date: native.end_date ?? null,
+        observation_count: native.observation_count,
+        cumulative_total_return: nativeFiniteNumber(native.cumulative_total_return),
+        annualized_total_return: nativeFiniteNumber(native.annualized_total_return),
+        reason_codes: [],
+      } : {
+        coverage_status: "MISSING",
+        method: String(native.method || "UNAVAILABLE"),
+        scope: null,
+        start_date: null,
+        end_date: null,
+        observation_count: 0,
+        cumulative_total_return: null,
+        annualized_total_return: null,
+        reason_codes: Array.isArray(native.reason_codes) ? native.reason_codes.map(String) : [],
+      },
+    };
+  });
+  if (safeBreakdown.some((row) => row === null)) return null;
+  if (!["Futu", "Tiger"].every((broker) => seen.has(broker))) return null;
+  if (safeBreakdown.length) {
+    const breakdownNav = safeBreakdown.reduce((sum, row) => sum + row.derived_nav_usd, 0);
+    const breakdownGross = safeBreakdown.reduce((sum, row) => sum + row.gross_market_value_usd, 0);
+    const identitiesValid = Math.abs(breakdownNav - nav) < 0.005
+      && Math.abs(breakdownGross - gross) < 0.005
+      && safeBreakdown.every((row) =>
+        Math.abs(row.gross_leverage - row.gross_market_value_usd / row.derived_nav_usd) < 0.0001,
+      );
+    if (!identitiesValid) return null;
+  }
+  const result = Object.fromEntries(PORTFOLIO_OVERVIEW_FIELDS.map((field) => [
     field,
     field === "gross_leverage_red"
       ? (typeof value[field] === "number" && Number.isFinite(value[field]) ? value[field] : null)
       : (value[field] ?? null),
   ]));
+  result.broker_breakdown = safeBreakdown;
+  return result;
 }
 
 export function updateLastConfirmedPortfolioOverview(current, incoming) {
