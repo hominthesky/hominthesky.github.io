@@ -23,7 +23,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260809-1";
+} from "./live_trading.mjs?v=20260810-1";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -435,6 +435,10 @@ const PORTFOLIO_RETURN_REASON_LABELS = Object.freeze({
   EXTERNAL_FLOW_FX_MISSING: "资金流水币种无法换算",
   EXTERNAL_FLOW_INVALID: "资金流水未通过校验",
   EXTERNAL_FLOW_SIGN_INVALID: "入出金方向未通过校验",
+  CAPITAL_FLOW_COVERAGE_INCOMPLETE: "Futu 资本流覆盖不完整",
+  CAPITAL_FLOW_FX_MISSING: "Futu 资本流币种无法换算",
+  CAPITAL_FLOW_INVALID: "Futu 资本流未通过校验",
+  CAPITAL_FLOW_SIGN_INVALID: "Futu 资本流方向未通过校验",
   RETURN_DENOMINATOR_NON_POSITIVE: "收益率分母无效",
   RETURN_OUT_OF_DOMAIN: "收益率超出可计算范围",
 });
@@ -442,6 +446,10 @@ const PORTFOLIO_RETURN_REASON_LABELS = Object.freeze({
 const PORTFOLIO_RETURN_CONTRACT = Object.freeze({
   id: "portfolio_total_return_v1",
   formula: "chain_link((NAV_end - NAV_begin - external_flow) / (NAV_begin + 0.5 * external_flow)); annualized=(1+cumulative)^(365/elapsed_calendar_days)-1",
+});
+const BROKER_RETURN_CONTRACT = Object.freeze({
+  id: "broker_portfolio_return_v1",
+  formula: "chain_link((broker_NAV_end - broker_NAV_begin - broker_capital_flow) / (broker_NAV_begin + 0.5 * broker_capital_flow)); annualized=(1+cumulative)^(365/elapsed_calendar_days)-1",
 });
 
 function overviewMetric(label, value, note, options = {}) {
@@ -528,6 +536,35 @@ function renderPortfolioOverview() {
         definition: TERM_DEFINITIONS.portfolioTotalReturn,
         tone: annualized === null ? "" : annualized >= 0 ? "positive" : "negative",
         details: orderedBrokers.map((row) => {
+          if (row.broker === "Futu") {
+            const calculated = row.calculated_return || {};
+            const governed = calculated.contract_id === BROKER_RETURN_CONTRACT.id
+              && calculated.formula === BROKER_RETURN_CONTRACT.formula
+              && calculated.method === "SYSTEM_CALCULATED"
+              && calculated.broker === "Futu";
+            const calculatedAnnualized = governed && isFiniteMetric(calculated.annualized_total_return)
+              ? calculated.annualized_total_return : null;
+            const calculatedCumulative = governed && isFiniteMetric(calculated.cumulative_total_return)
+              ? calculated.cumulative_total_return : null;
+            const calculatedReason = (Array.isArray(calculated.reason_codes) ? calculated.reason_codes : [])
+              .map((code) => PORTFOLIO_RETURN_REASON_LABELS[code])
+              .find(Boolean);
+            if (calculatedAnnualized !== null) return {
+              label: row.broker,
+              value: pct(calculatedAnnualized, 1),
+              note: `系统自算 · 累计 ${pct(calculatedCumulative, 1)} · ${calculated.start_date || "—"}—${calculated.end_date || "—"}`,
+            };
+            if (calculatedCumulative !== null) return {
+              label: row.broker,
+              value: `累计 ${pct(calculatedCumulative, 1)}`,
+              note: `系统自算 · ${calculatedReason || "满 30 个自然日后显示年化"} · ${calculated.start_date || "—"}—${calculated.end_date || "—"}`,
+            };
+            return {
+              label: row.broker,
+              value: "—",
+              note: `系统自算 · ${calculatedReason === "共同历史积累中" ? "日终历史积累中" : calculatedReason || "日终历史积累中"}`,
+            };
+          }
           const native = row.native_return || {};
           const nativeAnnualized = isFiniteMetric(native.annualized_total_return)
             ? native.annualized_total_return : null;
@@ -535,7 +572,7 @@ function renderPortfolioOverview() {
             ? {
                 label: row.broker,
                 value: "—",
-                note: row.broker === "Futu" ? "OpenAPI 未开放历史资产回报" : "券商原生历史不可用",
+                note: "券商原生历史不可用",
               }
             : {
                 label: row.broker,

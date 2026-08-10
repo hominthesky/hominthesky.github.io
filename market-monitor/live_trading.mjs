@@ -48,6 +48,13 @@ const SOURCE_FAILURE_STATES = new Set([
   "MISSING",
   "FAILED",
 ]);
+const BROKER_CALCULATED_RETURN_FORMULA = "chain_link((broker_NAV_end - broker_NAV_begin - broker_capital_flow) / (broker_NAV_begin + 0.5 * broker_capital_flow)); annualized=(1+cumulative)^(365/elapsed_calendar_days)-1";
+const BROKER_CALCULATED_RETURN_REASONS = new Set([
+  "HISTORY_INVALID", "HISTORY_EMPTY", "HISTORY_ACCUMULATING", "VALUATION_GAP",
+  "CALENDAR_UNAVAILABLE", "CAPITAL_FLOW_COVERAGE_INCOMPLETE", "CAPITAL_FLOW_INVALID",
+  "CAPITAL_FLOW_FX_MISSING", "CAPITAL_FLOW_SIGN_INVALID", "RETURN_DENOMINATOR_NON_POSITIVE",
+  "RETURN_OUT_OF_DOMAIN", "ANNUALIZATION_INVALID", "MINIMUM_HISTORY_NOT_MET",
+]);
 
 export function yearCoverageLabel(coverageStatus) {
   const status = String(coverageStatus || "UNKNOWN").toUpperCase();
@@ -498,6 +505,65 @@ export function applyLiveRiskGate(personal, incoming) {
   };
 }
 
+function safeCalculatedBrokerReturn(value, broker) {
+  if (value === null || value === undefined) return {
+    contract_id: "broker_portfolio_return_v1",
+    formula: BROKER_CALCULATED_RETURN_FORMULA,
+    broker,
+    method: "SYSTEM_CALCULATED",
+    coverage_status: "MISSING",
+    start_date: null,
+    end_date: null,
+    elapsed_calendar_days: null,
+    cumulative_total_return: null,
+    annualized_total_return: null,
+    valuation_granularity: "DAILY_2000_ET",
+    capital_flow_coverage_status: "UNKNOWN",
+    reason_codes: ["HISTORY_EMPTY"],
+  };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const coverage = String(value.coverage_status || "MISSING");
+  const capitalStatus = String(value.capital_flow_coverage_status || "UNKNOWN");
+  const reasons = Array.isArray(value.reason_codes) ? value.reason_codes : [];
+  const elapsed = typeof value.elapsed_calendar_days === "number"
+    && Number.isInteger(value.elapsed_calendar_days) && value.elapsed_calendar_days >= 0
+    ? value.elapsed_calendar_days : null;
+  const cumulative = nativeFiniteNumber(value.cumulative_total_return);
+  const annualized = nativeFiniteNumber(value.annualized_total_return);
+  const start = value.start_date ?? null;
+  const end = value.end_date ?? null;
+  const datesValid = (start === null || /^\d{4}-\d{2}-\d{2}$/.test(String(start)))
+    && (end === null || /^\d{4}-\d{2}-\d{2}$/.test(String(end)))
+    && (start === null || end === null || start <= end);
+  if (value.contract_id !== "broker_portfolio_return_v1"
+    || value.formula !== BROKER_CALCULATED_RETURN_FORMULA
+    || value.broker !== broker || value.method !== "SYSTEM_CALCULATED"
+    || value.valuation_granularity !== "DAILY_2000_ET" || !datesValid
+    || !["COMPLETE", "PARTIAL", "MISSING", "FAILED"].includes(coverage)
+    || !["COMPLETE", "PARTIAL", "UNKNOWN"].includes(capitalStatus)
+    || reasons.some((reason) => typeof reason !== "string" || !BROKER_CALCULATED_RETURN_REASONS.has(reason))) return null;
+  if (coverage === "COMPLETE" && (start === null || end === null || elapsed === null
+    || cumulative === null || capitalStatus !== "COMPLETE"
+    || (elapsed >= 30 && annualized === null)
+    || (elapsed < 30 && (annualized !== null || !reasons.includes("MINIMUM_HISTORY_NOT_MET"))))) return null;
+  if (coverage !== "COMPLETE" && (elapsed !== null || cumulative !== null || annualized !== null)) return null;
+  return {
+    contract_id: "broker_portfolio_return_v1",
+    formula: BROKER_CALCULATED_RETURN_FORMULA,
+    broker,
+    method: "SYSTEM_CALCULATED",
+    coverage_status: coverage,
+    start_date: start,
+    end_date: end,
+    elapsed_calendar_days: elapsed,
+    cumulative_total_return: cumulative,
+    annualized_total_return: annualized,
+    valuation_granularity: "DAILY_2000_ET",
+    capital_flow_coverage_status: capitalStatus,
+    reason_codes: reasons,
+  };
+}
+
 function confirmedPortfolioOverviewCandidate(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   if (String(value.source_status || "").toUpperCase() !== HEALTHY) return null;
@@ -537,6 +603,8 @@ function confirmedPortfolioOverviewCandidate(value) {
       && /^\d{4}-\d{2}-\d{2}$/.test(String(native.start_date || ""))
       && /^\d{4}-\d{2}-\d{2}$/.test(String(native.end_date || ""))
       && native.start_date <= native.end_date;
+    const calculatedReturn = safeCalculatedBrokerReturn(row?.calculated_return, broker);
+    if (calculatedReturn === null) return null;
     return {
       broker,
       source_status: "OK",
@@ -565,6 +633,7 @@ function confirmedPortfolioOverviewCandidate(value) {
         annualized_total_return: null,
         reason_codes: Array.isArray(native.reason_codes) ? native.reason_codes.map(String) : [],
       },
+      calculated_return: calculatedReturn,
     };
   });
   if (safeBreakdown.some((row) => row === null)) return null;
