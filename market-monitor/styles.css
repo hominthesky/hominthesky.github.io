@@ -1311,6 +1311,28 @@ input:focus {
 .live-primary .negative,
 .live-detail-item .negative { color: var(--red); }
 
+.live-cashflow-layer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.live-cashflow-layer > div { display: grid; gap: 4px; }
+.live-cashflow-label { color: var(--text-secondary); font-size: 11px; font-weight: 800; }
+.live-cashflow-layer small { color: var(--muted); font-size: 10px; }
+.live-cashflow-layer > strong {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.live-cashflow-layer .positive { color: var(--green); }
+.live-cashflow-layer .negative { color: var(--red); }
+
 .live-detail-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2528,6 +2550,7 @@ footer {
 
   .live-trading-head,
   .live-primary,
+  .live-cashflow-layer,
   .live-target-head {
     align-items: flex-start;
     flex-direction: column;

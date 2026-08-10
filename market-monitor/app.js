@@ -24,7 +24,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260810-5";
+} from "./live_trading.mjs?v=20260811-1";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -110,6 +110,8 @@ const TERM_DEFINITIONS = {
     "本次运行中该公开数据源成功取得有效观察值的比例。下降表示证据缺口变大，不代表市场风险改善。",
   netTradingPnl:
     "连续 FIFO 账本中，方向相反的成交实际减少已有成本批次时形成的毛收益，减去券商可取得费用。期初成本不明的 carried lot 平仓会被排除；未平仓浮盈亏不计入。",
+  provisionalRealizedTradingPnl:
+    "当前美东监控日截至最近券商检查时，连续 FIFO 中已被反向成交匹配的股票和期权数量所形成的已实现净收益。部分减仓即时计入，不等待整仓归零或交易日结束；不含开放数量的未实现盈亏。",
   grossTradingPnl:
     "已完成交易周期在扣除券商可取得手续费之前的收益。它用于解释成本侵蚀，不代表最终可支配现金。",
   netAfterCosts:
@@ -123,7 +125,7 @@ const TERM_DEFINITIONS = {
   dividendIncome:
     "已取得的 USD 现金股息减去股息预扣税，为税后股息分红现金流；不含股票送股、资本利得和未入账应收股息。",
   generatedCashflow:
-    "已归类为主动交易的股票完整周期（含日内与隔夜）与期权完整周期扣除可取得交易费用后的净收益，加上税后已入账现金股息。用于衡量策略与股息的现金创造能力；不含融资利息、长期资产出售、本金周转和未实现盈亏。",
+    "已归类为主动交易且成本可证明的股票已实现片段（含日内与隔夜）与期权已实现片段扣除可取得交易费用后的净收益，加上税后已入账现金股息。用于衡量策略与股息的现金创造能力；不含融资利息、长期资产出售、本金周转和未实现盈亏。",
   livingExpenseCashflow:
     "现金流创造加上账户实际入账的利息净额。用于评估生活开支覆盖，但不等于券商安全可提现金额；实际提现还受结算现金、保证金安全垫和税务准备金约束。",
   portfolioNav:
@@ -2228,14 +2230,21 @@ function renderLiveTrading(trading) {
   const cashflowValue = live?.cashflow_generated ?? live?.confirmed_cashflow_generated;
   const cashflowComplete = live?.cashflow_generated !== null && live?.cashflow_generated !== undefined;
   const cashflowScopeComplete = live?.active_scope_coverage_status === "COMPLETE";
+  const realizedTradingValue = live?.realized_trading_net_pnl ??
+    live?.confirmed_realized_trading_net_pnl;
+  const realizedTradingComplete = isFiniteMetric(live?.realized_trading_net_pnl);
   const card = el("section", `live-trading-card tone-${signal.tone}`);
   const head = el("div", "live-trading-head");
   const heading = el("div");
   append(
     heading,
     el("p", "eyebrow", "LIVE · PROVISIONAL"),
-    el("h2", "", `${live?.monitoring_day || "本日"} ${cashflowComplete ? "现金流创造" : "已确认现金流创造"}`),
-    el("p", "live-trading-window", live?.window_label || "美东 [T-1 20:00, T 20:00)"),
+    el("h2", "", `${live?.monitoring_day || "本日"} 截至当前交易实绩`),
+    el(
+      "p",
+      "live-trading-window",
+      `${live?.window_label || "美东 [T-1 20:00, T 20:00)"} · 截至 ${liveTime(live?.checked_at)}`,
+    ),
   );
   const refresh = el(
     "button",
@@ -2258,36 +2267,63 @@ function renderLiveTrading(trading) {
   const primary = el("div", "live-primary");
   const primaryValue = el(
     "strong",
-    Number(cashflowValue) < 0 ? "negative" : Number(cashflowValue) > 0 ? "positive" : "",
-    usd(cashflowValue),
+    Number(realizedTradingValue) < 0 ? "negative" : Number(realizedTradingValue) > 0 ? "positive" : "",
+    usd(realizedTradingValue),
   );
   const primaryCopy = el("div");
   append(
     primaryCopy,
     term(
-      cashflowComplete ? "当日现金流创造" : "当日已确认现金流创造",
-      TERM_DEFINITIONS.generatedCashflow,
+      realizedTradingComplete ? "截至当前已实现交易净收益" : "截至当前可确认已实现交易净收益",
+      TERM_DEFINITIONS.provisionalRealizedTradingPnl,
       "live-primary-label",
     ),
     el(
       "span",
       "",
-      cashflowComplete
-        ? "已归类的主动股票、期权与税后已入账股息；不含长期资产处置"
-        : !cashflowScopeComplete
-          ? `已排除 ${live?.unclassified_overnight_realization_count || 0} 笔未归类隔夜平仓；显示已确认小计`
-          : financial.complete
-            ? "连续 FIFO 账本、券商来源与可取得手续费均完整"
-            : financial.reason,
+      realizedTradingComplete
+        ? `${live?.realized_trading_cycle_count ?? 0} 个已实现片段；部分减仓即时计入，不等待整仓归零或日终`
+        : `Realized 覆盖不完整；仅显示成本与费用可证明的小计。${financial.reason}`,
     ),
   );
   append(primary, primaryCopy, primaryValue);
 
+  const cashflowLayer = el("div", "live-cashflow-layer");
+  const cashflowCopy = el("div");
+  append(
+    cashflowCopy,
+    term(
+      cashflowComplete ? "已归类现金流创造" : "可确认现金流创造",
+      TERM_DEFINITIONS.generatedCashflow,
+      "live-cashflow-label",
+    ),
+    el(
+      "small",
+      "",
+      cashflowComplete
+        ? "仅含主动股票、期权与税后股息；用于生活现金流评估"
+        : !cashflowScopeComplete
+          ? `另有 ${live?.unclassified_overnight_realization_count || 0} 个隔夜实现片段待归类，不进入生活现金流`
+          : "来源不完整时只显示严格可确认小计",
+    ),
+  );
+  append(
+    cashflowLayer,
+    cashflowCopy,
+    el(
+      "strong",
+      Number(cashflowValue) < 0 ? "negative" : Number(cashflowValue) > 0 ? "positive" : "",
+      usd(cashflowValue),
+    ),
+  );
+
   const details = el("div", "live-detail-grid");
   [
-    ["股票日内净入账", live?.intraday?.net_pnl, `${live?.intraday?.closed_trades ?? "—"} 个完成周期`],
-    ["已归类隔夜净入账", live?.cashflow_overnight_equity_net_pnl, "仅计入标为主动交易的完整周期"],
-    ["期权净入账", live?.options?.net_pnl, `${live?.options?.closed_trades ?? "—"} 个完成周期`],
+    ["股票日内净入账", live?.intraday?.net_pnl, `${live?.intraday?.closed_trades ?? "—"} 个已实现片段`],
+    ["已归类隔夜净入账", live?.cashflow_overnight_equity_net_pnl, "仅计入标为主动交易的已实现片段"],
+    ["期权净入账", live?.options?.net_pnl, `${live?.options?.closed_trades ?? "—"} 个已实现片段`],
+    ["待归类隔夜已实现", live?.unclassified_overnight_net_pnl, `${live?.unclassified_overnight_realization_count ?? "—"} 个片段；不进入生活现金流`],
+    ["长期资产处置已实现", live?.long_term_realization_net_pnl, `${live?.long_term_realization_count ?? "—"} 个片段；不进入生活现金流`],
     ["税后已入账股息", live?.cashflow_dividend, "不含应收或未入账股息"],
     ["可取得手续费", live?.cashflow_active_fees === null || live?.cashflow_active_fees === undefined ? null : -Math.abs(Number(live.cashflow_active_fees)), "已包含在当日现金流创造"],
   ].forEach(([label, value, note]) => {
@@ -2419,7 +2455,7 @@ function renderLiveTrading(trading) {
   statusBody.hidden = true;
   append(statusBody, facts, liveSourceRows(live), statusLine);
   append(statusDetails, statusSummary, statusBody);
-  append(card, head, primary, details, signalBlock, statusDetails, targetPanel);
+  append(card, head, primary, cashflowLayer, details, signalBlock, statusDetails, targetPanel);
   return card;
 }
 
