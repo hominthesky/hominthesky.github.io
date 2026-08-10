@@ -23,7 +23,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260810-1";
+} from "./live_trading.mjs?v=20260810-2";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -451,6 +451,10 @@ const BROKER_RETURN_CONTRACT = Object.freeze({
   id: "broker_portfolio_return_v1",
   formula: "chain_link((broker_NAV_end - broker_NAV_begin - broker_capital_flow) / (broker_NAV_begin + 0.5 * broker_capital_flow)); annualized=(1+cumulative)^(365/elapsed_calendar_days)-1",
 });
+const MANUAL_RETURN_REFERENCE_CONTRACT = Object.freeze({
+  id: "manual_broker_return_reference_v1",
+  formula: "broker_app_reported_cash_weighted_return_and_interval_profit",
+});
 
 function overviewMetric(label, value, note, options = {}) {
   const item = el("div", "portfolio-overview-metric");
@@ -535,8 +539,23 @@ function renderPortfolioOverview() {
       {
         definition: TERM_DEFINITIONS.portfolioTotalReturn,
         tone: annualized === null ? "" : annualized >= 0 ? "positive" : "negative",
-        details: orderedBrokers.map((row) => {
+        details: orderedBrokers.flatMap((row) => {
           if (row.broker === "Futu") {
+            const details = [];
+            const manual = row.manual_return_reference || {};
+            const governedManual = manual.contract_id === MANUAL_RETURN_REFERENCE_CONTRACT.id
+              && manual.formula === MANUAL_RETURN_REFERENCE_CONTRACT.formula
+              && manual.broker === "Futu" && manual.scope === "US_EQUITIES"
+              && manual.method === "BROKER_APP_CASH_WEIGHTED"
+              && manual.verification_status === "USER_CONFIRMED"
+              && manual.currency === "USD" && manual.auto_refresh === false
+              && isFiniteMetric(manual.cash_weighted_return)
+              && isFiniteMetric(manual.interval_profit_usd);
+            if (governedManual) details.push({
+              label: "Futu · 券商 App 手工核验（现金加权）",
+              value: pct(manual.cash_weighted_return, 2),
+              note: `券商 App 现金加权 · 美股区间收益 ${usdExact(manual.interval_profit_usd)} · ${manual.start_date || "—"}—${liveTime(manual.as_of)} · 不会自动更新`,
+            });
             const calculated = row.calculated_return || {};
             const governed = calculated.contract_id === BROKER_RETURN_CONTRACT.id
               && calculated.formula === BROKER_RETURN_CONTRACT.formula
@@ -549,36 +568,37 @@ function renderPortfolioOverview() {
             const calculatedReason = (Array.isArray(calculated.reason_codes) ? calculated.reason_codes : [])
               .map((code) => PORTFOLIO_RETURN_REASON_LABELS[code])
               .find(Boolean);
-            if (calculatedAnnualized !== null) return {
-              label: row.broker,
+            if (calculatedAnnualized !== null) details.push({
+              label: "Futu · 系统",
               value: pct(calculatedAnnualized, 1),
               note: `系统自算 · 累计 ${pct(calculatedCumulative, 1)} · ${calculated.start_date || "—"}—${calculated.end_date || "—"}`,
-            };
-            if (calculatedCumulative !== null) return {
-              label: row.broker,
+            });
+            else if (calculatedCumulative !== null) details.push({
+              label: "Futu · 系统",
               value: `累计 ${pct(calculatedCumulative, 1)}`,
               note: `系统自算 · ${calculatedReason || "满 30 个自然日后显示年化"} · ${calculated.start_date || "—"}—${calculated.end_date || "—"}`,
-            };
-            return {
-              label: row.broker,
+            });
+            else details.push({
+              label: "Futu · 系统",
               value: "—",
               note: `系统自算 · ${calculatedReason === "共同历史积累中" ? "日终历史积累中" : calculatedReason || "日终历史积累中"}`,
-            };
+            });
+            return details;
           }
           const native = row.native_return || {};
           const nativeAnnualized = isFiniteMetric(native.annualized_total_return)
             ? native.annualized_total_return : null;
-          return nativeAnnualized === null
+          return [nativeAnnualized === null
             ? {
-                label: row.broker,
+                label: "Tiger · 原生",
                 value: "—",
                 note: "券商原生历史不可用",
               }
             : {
-                label: row.broker,
+                label: "Tiger · 原生",
                 value: pct(nativeAnnualized, 1),
                 note: `证券账户（SEC）原生 · 累计 ${pct(native.cumulative_total_return, 1)} · ${native.end_date || "—"}`,
-              };
+              }];
         }),
       },
     ),
