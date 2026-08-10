@@ -147,6 +147,24 @@ function nativeFiniteNumber(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+export function resolveLiveRealizedTradingDisplay(live) {
+  const triplet = (prefix = "") => {
+    const gross = nativeFiniteNumber(live?.[`${prefix}realized_trading_gross_pnl`]);
+    const fees = nativeFiniteNumber(live?.[`${prefix}realized_trading_fees`]);
+    const net = nativeFiniteNumber(live?.[`${prefix}realized_trading_net_pnl`]);
+    if (
+      gross === null || fees === null || net === null ||
+      Math.abs((gross - fees) - net) > 0.01
+    ) return null;
+    return { gross, fees, net };
+  };
+  const governed = triplet();
+  if (governed) return { ...governed, complete: true };
+  const confirmed = triplet("confirmed_");
+  if (confirmed) return { ...confirmed, complete: false };
+  return { gross: null, fees: null, net: null, complete: false };
+}
+
 export function anchoredPortfolioReturnReference(summary) {
   const rows = Array.isArray(summary?.broker_breakdown) ? summary.broker_breakdown : [];
   if (rows.length !== 2 || new Set(rows.map((row) => row?.broker)).size !== 2) return null;
@@ -1158,7 +1176,11 @@ export function liveFinancialFingerprint(live) {
     fees: live.fees ?? null,
     active_net_pnl: live.active_net_pnl ?? null,
     cycle_count: live.cycle_count ?? null,
+    realized_trading_gross_pnl: live.realized_trading_gross_pnl ?? null,
+    realized_trading_fees: live.realized_trading_fees ?? null,
     realized_trading_net_pnl: live.realized_trading_net_pnl ?? null,
+    confirmed_realized_trading_gross_pnl: live.confirmed_realized_trading_gross_pnl ?? null,
+    confirmed_realized_trading_fees: live.confirmed_realized_trading_fees ?? null,
     confirmed_realized_trading_net_pnl: live.confirmed_realized_trading_net_pnl ?? null,
     realized_trading_cycle_count: live.realized_trading_cycle_count ?? null,
     unclassified_overnight_net_pnl: live.unclassified_overnight_net_pnl ?? null,

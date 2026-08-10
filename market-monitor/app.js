@@ -19,12 +19,13 @@ import {
   manualRefreshLabel,
   periodDecisionComplete,
   refreshProofMessage,
+  resolveLiveRealizedTradingDisplay,
   resolvePeriodCashflowDisplay,
   resolvePendingManualRefresh,
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260811-1";
+} from "./live_trading.mjs?v=20260811-2";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -2230,9 +2231,9 @@ function renderLiveTrading(trading) {
   const cashflowValue = live?.cashflow_generated ?? live?.confirmed_cashflow_generated;
   const cashflowComplete = live?.cashflow_generated !== null && live?.cashflow_generated !== undefined;
   const cashflowScopeComplete = live?.active_scope_coverage_status === "COMPLETE";
-  const realizedTradingValue = live?.realized_trading_net_pnl ??
-    live?.confirmed_realized_trading_net_pnl;
-  const realizedTradingComplete = isFiniteMetric(live?.realized_trading_net_pnl);
+  const realizedTrading = resolveLiveRealizedTradingDisplay(live);
+  const realizedTradingValue = realizedTrading.net;
+  const realizedTradingComplete = realizedTrading.complete;
   const card = el("section", `live-trading-card tone-${signal.tone}`);
   const head = el("div", "live-trading-head");
   const heading = el("div");
@@ -2325,7 +2326,11 @@ function renderLiveTrading(trading) {
     ["待归类隔夜已实现", live?.unclassified_overnight_net_pnl, `${live?.unclassified_overnight_realization_count ?? "—"} 个片段；不进入生活现金流`],
     ["长期资产处置已实现", live?.long_term_realization_net_pnl, `${live?.long_term_realization_count ?? "—"} 个片段；不进入生活现金流`],
     ["税后已入账股息", live?.cashflow_dividend, "不含应收或未入账股息"],
-    ["可取得手续费", live?.cashflow_active_fees === null || live?.cashflow_active_fees === undefined ? null : -Math.abs(Number(live.cashflow_active_fees)), "已包含在当日现金流创造"],
+    [
+      realizedTradingComplete ? "已实现交易手续费 / 税费" : "可确认已实现交易手续费 / 税费",
+      realizedTrading.fees === null ? null : -Math.abs(realizedTrading.fees),
+      "按已实现数量分摊开仓与平仓的可取得佣金、平台费及交易相关税费；已包含在上方交易净收益",
+    ],
   ].forEach(([label, value, note]) => {
     const item = el("div", "live-detail-item");
     append(
