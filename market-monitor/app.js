@@ -25,7 +25,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260811-2";
+} from "./live_trading.mjs?v=20260811-3";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -2234,6 +2234,12 @@ function renderLiveTrading(trading) {
   const realizedTrading = resolveLiveRealizedTradingDisplay(live);
   const realizedTradingValue = realizedTrading.net;
   const realizedTradingComplete = realizedTrading.complete;
+  const executionFees = isFiniteMetric(live?.executed_order_fees)
+    ? live.executed_order_fees
+    : isFiniteMetric(live?.confirmed_executed_order_fees)
+      ? live.confirmed_executed_order_fees
+      : null;
+  const executionFeesComplete = isFiniteMetric(live?.executed_order_fees);
   const card = el("section", `live-trading-card tone-${signal.tone}`);
   const head = el("div", "live-trading-head");
   const heading = el("div");
@@ -2327,7 +2333,12 @@ function renderLiveTrading(trading) {
     ["长期资产处置已实现", live?.long_term_realization_net_pnl, `${live?.long_term_realization_count ?? "—"} 个片段；不进入生活现金流`],
     ["税后已入账股息", live?.cashflow_dividend, "不含应收或未入账股息"],
     [
-      realizedTradingComplete ? "已实现交易手续费 / 税费" : "可确认已实现交易手续费 / 税费",
+      executionFeesComplete ? "已成交订单手续费 / 税费" : "可确认已成交订单手续费 / 税费",
+      executionFees === null ? null : -Math.abs(executionFees),
+      `${live?.executed_order_fill_count ?? "—"} 笔成交；包含尚未形成已实现收益的开仓费用，不会重复扣入上方净收益`,
+    ],
+    [
+      realizedTradingComplete ? "已实现片段分摊费用" : "可确认已实现片段分摊费用",
       realizedTrading.fees === null ? null : -Math.abs(realizedTrading.fees),
       "按已实现数量分摊开仓与平仓的可取得佣金、平台费及交易相关税费；已包含在上方交易净收益",
     ],
