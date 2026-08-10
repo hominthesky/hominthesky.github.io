@@ -230,7 +230,15 @@ function cashflowChartComponentValues(period, interest) {
   ]));
 }
 
-function cashflowChartDay(period, cadence, sourcesComplete, yearComplete, labels) {
+export function resolvePeriodCashflowDisplay(
+  period,
+  {
+    cadence = period?.cadence || "day",
+    sourcesComplete = false,
+    yearComplete = false,
+    labels = {},
+  } = {},
+) {
   const generatedDeclaredComplete = cashflowChartGeneratedDeclaredComplete(
     period,
     sourcesComplete,
@@ -282,6 +290,15 @@ function cashflowChartDay(period, cadence, sourcesComplete, yearComplete, labels
     livingComplete,
     coverageComplete: livingComplete,
   };
+}
+
+export function periodDecisionComplete(display) {
+  return Boolean(
+    display?.generatedComplete === true &&
+    display?.interestComplete === true &&
+    display?.livingComplete === true &&
+    nativeFiniteNumber(display?.livingValue) !== null,
+  );
 }
 
 function cashflowChartGroupKey(day, cadence) {
@@ -353,20 +370,23 @@ export function buildCashflowChartSeries(
     .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(String(row?.date || "")))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   if (cadence === "day") {
-    return ordered.slice(-30).map((row) => cashflowChartDay(
-      row,
+    return ordered.slice(-30).map((row) => resolvePeriodCashflowDisplay(row, {
       cadence,
       sourcesComplete,
       yearComplete,
-      { label: row.date.slice(5), fullLabel: row.date },
-    ));
+      labels: { label: row.date.slice(5), fullLabel: row.date },
+    }));
   }
 
   const groups = new Map();
   ordered.forEach((row) => {
     const key = cashflowChartGroupKey(row.date, cadence);
     const group = groups.get(key) || emptyCashflowChartGroup();
-    const point = cashflowChartDay(row, cadence, sourcesComplete, yearComplete, {});
+    const point = resolvePeriodCashflowDisplay(row, {
+      cadence,
+      sourcesComplete,
+      yearComplete,
+    });
     group.hasRows = true;
     for (const [valueKey, knownKey] of [
       ["value", "valueKnown"],

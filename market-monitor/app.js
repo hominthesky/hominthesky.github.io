@@ -17,14 +17,14 @@ import {
   liveFinancialComplete,
   isPeriodCoverageComplete,
   manualRefreshLabel,
-  periodDisplayGeneratedCashflow,
+  periodDecisionComplete,
   refreshProofMessage,
-  resolveTradingCashflow,
+  resolvePeriodCashflowDisplay,
   resolvePendingManualRefresh,
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260810-4";
+} from "./live_trading.mjs?v=20260810-5";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -1403,20 +1403,17 @@ function settledPeriodComplete(trading, period) {
   return periodCashflowHealth(trading, period) === "OK";
 }
 
-function periodGeneratedCashflow(period) {
-  return resolveTradingCashflow(period).generated;
+function periodCashflowDisplay(trading, period) {
+  return resolvePeriodCashflowDisplay(period, {
+    cadence: period?.cadence || "day",
+    sourcesComplete: tradingSourcesComplete(trading) && isPeriodCoverageComplete(period),
+    yearComplete: period?.cadence !== "year" || period?.coverage_status === "COMPLETE",
+  });
 }
 
-function periodAccountInterest(period) {
-  return resolveTradingCashflow(period).interest;
-}
-
-function periodLivingExpenseCashflow(period) {
-  return resolveTradingCashflow(period).living;
-}
-
-function livingExpenseCoverage(period, trading) {
+function livingExpenseCoverage(period, trading, display = periodCashflowDisplay(trading, period)) {
   const cashflowHealth = periodCashflowHealth(trading, period);
+  const decisionComplete = periodDecisionComplete(display);
   const generatedAtMs = Date.parse(monitorData?.meta?.generated_at || "");
   const referenceDate = easternCalendarDate(
     Number.isFinite(generatedAtMs) ? new Date(generatedAtMs) : new Date(),
@@ -1432,15 +1429,17 @@ function livingExpenseCoverage(period, trading) {
       readPositiveLocalNumber("zzao-monitor-monthly-target-cny") ??
       trading?.plan?.monthly_target_cny ??
       DEFAULT_MONTHLY_TARGET_CNY,
-    livingExpenseNetCashflowUsd: periodLivingExpenseCashflow(period),
+    livingExpenseNetCashflowUsd: decisionComplete ? display.livingValue : null,
     usdCnyRate: monitorData?.meta?.usd_cny_rate,
-    coverageStatus: cashflowHealth,
+    coverageStatus: decisionComplete
+      ? cashflowHealth
+      : combineHealthStatuses([cashflowHealth, "PARTIAL"]),
     fxStatus,
   });
 }
 
-function tradingAction(period, portfolioSummary, coverageComplete = true) {
-  if (!coverageComplete) {
+function tradingAction(period, portfolioSummary, display) {
+  if (!periodDecisionComplete(display)) {
     return "数据覆盖不完整：仅用于核对，不据此判断可分配现金、扩大仓位或结束当日交易。";
   }
   const trades = Number(period.intraday_closed_trades || 0) + Number(period.option_closed_trades || 0);
@@ -1451,7 +1450,7 @@ function tradingAction(period, portfolioSummary, coverageComplete = true) {
   if (!trades) return "尚无已完成周期；不要把未平仓浮盈当作可分配现金。";
   if (trades < 20) return "已完成周期少于20个：胜率与利润因子仅作早期观察，不据此放大仓位。";
   if (pnl < 0 || weak) return "净收益为负或利润因子低于1：缩小单笔风险，先复盘亏损集中来源。";
-  if (Number(periodLivingExpenseCashflow(period)) < 0) {
+  if (display.livingValue < 0) {
     return "账户生活开支评估净现金流为负：融资成本已超过本期现金创造；缺口不构成追单理由。";
   }
   if (portfolioSummary.portfolio_gate === "RED") {
@@ -1540,11 +1539,11 @@ function renderTradingPerformance(trading, portfolioSummary) {
   (trading.periods || []).forEach((period) => {
     const realizedComplete = period?.realized_coverage_status === "COMPLETE";
     const historyComplete = isPeriodCoverageComplete(period);
-    const coverageComplete = settledPeriodComplete(trading, period);
-    const displayedGeneratedCashflow = periodDisplayGeneratedCashflow(period, coverageComplete);
-    const accountInterest = periodAccountInterest(period);
-    const livingCashflow = periodLivingExpenseCashflow(period);
-    const expenseCoverage = livingExpenseCoverage(period, trading);
+    const display = periodCashflowDisplay(trading, period);
+    const displayedGeneratedCashflow = display.value;
+    const accountInterest = display.interestValue;
+    const livingCashflow = display.livingValue;
+    const expenseCoverage = livingExpenseCoverage(period, trading, display);
     const periodTone = isFiniteMetric(displayedGeneratedCashflow)
       ? Number(displayedGeneratedCashflow) < 0 ? "tone-red" : "tone-green"
       : "";
@@ -1567,14 +1566,14 @@ function renderTradingPerformance(trading, portfolioSummary) {
     append(
       primaryCopy,
       term(
-        coverageComplete ? "现金流创造" : "已确认现金流创造",
+        display.generatedComplete ? "现金流创造" : "可确认现金流创造",
         TERM_DEFINITIONS.generatedCashflow,
         "trading-primary-label",
       ),
       el(
         "span",
         "trading-primary-formula",
-        coverageComplete
+        display.generatedComplete
           ? "主动股票净收益（含已归类隔夜）+ 期权净收益 + 税后股息"
           : period.active_scope_coverage_status !== "COMPLETE"
             ? `另有 ${period.unclassified_overnight_realization_count || 0} 笔隔夜股票待归类；完整总额未知`
@@ -1602,8 +1601,15 @@ function renderTradingPerformance(trading, portfolioSummary) {
     const livingRow = el("div", "cashflow-bridge-row result");
     append(
       livingRow,
-      term("生活开支评估净现金流", TERM_DEFINITIONS.livingExpenseCashflow),
-      el("strong", Number(livingCashflow) < 0 ? "negative" : "positive", usd(livingCashflow)),
+      term(
+        display.livingComplete ? "生活开支评估净现金流" : "可确认生活净额",
+        TERM_DEFINITIONS.livingExpenseCashflow,
+      ),
+      el(
+        "strong",
+        isFiniteMetric(livingCashflow) ? Number(livingCashflow) < 0 ? "negative" : "positive" : "",
+        usd(livingCashflow),
+      ),
     );
     append(bridge, interestRow, livingRow);
     if (period.cadence === "month") {
@@ -1667,9 +1673,9 @@ function renderTradingPerformance(trading, portfolioSummary) {
         "账户级现金调整",
         "cost",
         [
-          { label: "现金流创造", value: displayedGeneratedCashflow, definition: TERM_DEFINITIONS.generatedCashflow },
+          { label: display.generatedComplete ? "现金流创造" : "可确认现金流创造", value: displayedGeneratedCashflow, definition: TERM_DEFINITIONS.generatedCashflow },
           { label: "融资 / 借券 / 其他利息", value: accountInterest, definition: "服务长期持仓的融资成本及账户其他已入账利息净额；负值减少生活开支可用现金，但不归因给日内或期权策略。" },
-          { label: "生活开支评估净现金流", value: livingCashflow, definition: TERM_DEFINITIONS.livingExpenseCashflow, primary: true },
+          { label: display.livingComplete ? "生活开支评估净现金流" : "可确认生活净额", value: livingCashflow, definition: TERM_DEFINITIONS.livingExpenseCashflow, primary: true },
         ],
         "不等于安全可提现金额；仍需结算现金、保证金安全垫与税务准备金。",
       ),
@@ -1688,13 +1694,13 @@ function renderTradingPerformance(trading, portfolioSummary) {
             : (period.dividend_coverage_status ?? period.passive_cashflow_coverage_status) !== "COMPLETE" ||
                 (period.interest_coverage_status ?? period.passive_cashflow_coverage_status) !== "COMPLETE"
               ? "股息或利息现金流水覆盖不完整；本卡仅显示可确认来源金额。"
-              : coverageComplete
+              : periodDecisionComplete(display)
             ? "Realized 与历史覆盖完整。"
             : "券商来源或费用覆盖不完整，本卡仅用于核对。";
     const advice = el(
       "p",
       "trading-advice",
-      `${period.coverage_reason || ""} ${coverageNote} ${tradingAction(period, portfolioSummary, coverageComplete)} ${scopeNote}`,
+      `${period.coverage_reason || ""} ${coverageNote} ${tradingAction(period, portfolioSummary, display)} ${scopeNote}`,
     );
     append(row, head, primary, bridge, inputsHead, inputs, advice);
     periodList.appendChild(row);
@@ -2448,9 +2454,12 @@ function renderTrading() {
   root.appendChild(liveRegion);
   const focus = periods.find((period) => period.cadence === "month") || periods[0];
   if (focus) {
-    const generated = periodGeneratedCashflow(focus);
-    const living = periodLivingExpenseCashflow(focus);
-    const coverage = livingExpenseCoverage(focus, trading);
+    const display = periodCashflowDisplay(trading, focus);
+    const generated = display.value;
+    const living = display.livingValue;
+    const generatedLabel = display.generatedComplete ? "现金流创造" : "可确认现金流创造";
+    const livingLabel = display.livingComplete ? "生活净额" : "可确认生活净额";
+    const coverage = livingExpenseCoverage(focus, trading, display);
     const tone = isFiniteMetric(living)
       ? Number(living) < 0 ? "" : "amber"
       : "";
@@ -2461,12 +2470,12 @@ function renderTrading() {
       el(
         "h2",
         "",
-        `${cadenceLabel(focus.cadence, focus)} · 现金流创造 ${usd(generated)} · 生活净额 ${usd(living)}`,
+        `${cadenceLabel(focus.cadence, focus)} · ${generatedLabel} ${usd(generated)} · ${livingLabel} ${usd(living)}`,
       ),
       el(
         "p",
         "",
-        `${focus.start_date || "起点未知"} — ${focus.end_date} · ${coverage.status === "OK" ? `月目标覆盖 ${pct(coverage.coverageRatio)}` : coverage.reason} ${tradingAction(focus, summary, settledPeriodComplete(trading, focus))}`,
+        `${focus.start_date || "起点未知"} — ${focus.end_date} · ${coverage.status === "OK" ? `月目标覆盖 ${pct(coverage.coverageRatio)}` : coverage.reason} ${tradingAction(focus, summary, display)}`,
       ),
     );
     append(banner, el("div", "risk-bar"), copy);
