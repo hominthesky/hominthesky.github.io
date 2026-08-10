@@ -5,6 +5,7 @@ import {
   LIVE_POLL_INTERVAL_MS,
   MANUAL_REFRESH_TIMEOUT_MS,
   applyLiveRiskGate,
+  anchoredPortfolioReturnReference,
   assessLiveTradingSignal,
   buildCashflowChartSeries,
   calculateDailyTarget,
@@ -23,7 +24,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260810-2";
+} from "./live_trading.mjs?v=20260810-3";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -500,6 +501,8 @@ function renderPortfolioOverview() {
   const annualized = governedReturn && isFiniteMetric(portfolioReturn.annualized_total_return)
     ? portfolioReturn.annualized_total_return
     : null;
+  const anchoredReference = anchoredPortfolioReturnReference(summary);
+  const displayedAnnualized = annualized ?? anchoredReference?.portfolio_annualized_reference ?? null;
   const reasonCodes = Array.isArray(portfolioReturn.reason_codes)
     ? portfolioReturn.reason_codes
     : [];
@@ -533,12 +536,16 @@ function renderPortfolioOverview() {
       },
     ),
     overviewMetric(
-      "组合年化总回报",
-      annualized === null ? "—" : pct(annualized, 1),
-      returnNote,
+      annualized === null && displayedAnnualized !== null
+        ? "跨券商综合年化参考"
+        : "组合年化总回报",
+      displayedAnnualized === null ? "—" : pct(displayedAnnualized, 1),
+      annualized === null && displayedAnnualized !== null
+        ? `跨券商综合年化参考（当前净资产加权估算） · ${anchoredReference.start_date}—${anchoredReference.end_date}`
+        : returnNote,
       {
         definition: TERM_DEFINITIONS.portfolioTotalReturn,
-        tone: annualized === null ? "" : annualized >= 0 ? "positive" : "negative",
+        tone: displayedAnnualized === null ? "" : displayedAnnualized >= 0 ? "positive" : "negative",
         details: orderedBrokers.flatMap((row) => {
           if (row.broker === "Futu") {
             const details = [];
@@ -552,9 +559,9 @@ function renderPortfolioOverview() {
               && isFiniteMetric(manual.cash_weighted_return)
               && isFiniteMetric(manual.interval_profit_usd);
             if (governedManual) details.push({
-              label: "Futu · 券商 App 手工核验（现金加权）",
-              value: pct(manual.cash_weighted_return, 2),
-              note: `券商 App 现金加权 · 美股区间收益 ${usdExact(manual.interval_profit_usd)} · ${manual.start_date || "—"}—${liveTime(manual.as_of)} · 不会自动更新`,
+              label: "Futu · 锚定年化估算",
+              value: anchoredReference?.futu_annualized_estimate == null ? "—" : pct(anchoredReference.futu_annualized_estimate, 1),
+              note: `券商 App 现金加权锚点 ${pct(manual.cash_weighted_return, 2)}、区间收益 ${usdExact(manual.interval_profit_usd)}（截至 ${manual.anchor_effective_date || "—"}，锚点不会自动更新）· 后续系统日终续算 · 累计 ${anchoredReference ? pct(anchoredReference.futu_cumulative, 1) : "—"} · ${manual.start_date || "—"}—${anchoredReference?.end_date || liveTime(manual.as_of)} · 混合方法估算`,
             });
             const calculated = row.calculated_return || {};
             const governed = calculated.contract_id === BROKER_RETURN_CONTRACT.id
