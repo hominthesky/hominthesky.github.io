@@ -24,7 +24,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260810-3";
+} from "./live_trading.mjs?v=20260810-4";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;

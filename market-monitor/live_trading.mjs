@@ -159,13 +159,16 @@ export function anchoredPortfolioReturnReference(summary) {
   if (!manual || manual.verification_status !== "USER_CONFIRMED" || !calculated) return null;
   const manualReturn = nativeFiniteNumber(manual.cash_weighted_return);
   const anchor = manual.anchor_effective_date;
-  const accumulatingAtAnchor = calculated.coverage_status === "MISSING"
-    && calculated.reason_codes?.includes("HISTORY_ACCUMULATING")
-    && calculated.start_date === anchor && calculated.end_date === anchor;
+  const noContinuationYet = calculated.coverage_status === "MISSING"
+    && calculated.capital_flow_coverage_status === "UNKNOWN"
+    && calculated.reason_codes?.length === 1
+    && calculated.reason_codes[0] === "HISTORY_ACCUMULATING"
+    && ((calculated.start_date === null && calculated.end_date === null)
+      || (calculated.start_date === anchor && calculated.end_date === anchor));
   const completeContinuation = calculated.coverage_status === "COMPLETE"
     && calculated.capital_flow_coverage_status === "COMPLETE"
     && calculated.start_date === anchor && calculated.end_date >= anchor;
-  if (!accumulatingAtAnchor && !completeContinuation) return null;
+  if (!noContinuationYet && !completeContinuation) return null;
   const postAnchor = completeContinuation
     ? nativeFiniteNumber(calculated.cumulative_total_return) : 0;
   if (manualReturn === null || postAnchor === null) return null;
