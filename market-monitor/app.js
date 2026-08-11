@@ -14,18 +14,18 @@ import {
   deriveFxStatus,
   derivePortfolioGateInput,
   liveFinancialFingerprint,
-  liveFinancialComplete,
   isPeriodCoverageComplete,
   manualRefreshLabel,
   periodDecisionComplete,
   refreshProofMessage,
+  resolveLiveCashflowDisplay,
   resolveLiveRealizedTradingDisplay,
   resolvePeriodCashflowDisplay,
   resolvePendingManualRefresh,
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260811-3";
+} from "./live_trading.mjs?v=20260812-1";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -564,7 +564,7 @@ function renderPortfolioOverview() {
             if (governedManual) details.push({
               label: "Futu · 锚定年化估算",
               value: anchoredReference?.futu_annualized_estimate == null ? "—" : pct(anchoredReference.futu_annualized_estimate, 1),
-              note: `券商 App 现金加权锚点 ${pct(manual.cash_weighted_return, 2)}、区间收益 ${usdExact(manual.interval_profit_usd)}（截至 ${manual.anchor_effective_date || "—"}，锚点不会自动更新）· 后续系统日终续算 · 累计 ${anchoredReference ? pct(anchoredReference.futu_cumulative, 1) : "—"} · ${manual.start_date || "—"}—${anchoredReference?.end_date || liveTime(manual.as_of)} · 混合方法估算`,
+              note: `券商 App 现金加权锚点 ${pct(manual.cash_weighted_return, 2)}、区间收益 ${usdExact(manual.interval_profit_usd)}（截至 ${manual.anchor_effective_date || "—"}，锚点不会自动更新）· ${anchoredReference?.continuation_status === "CONTINUING" ? "后续系统日终已续算" : anchoredReference?.continuation_status === "ANCHOR_ONLY_REANCHOR_REQUIRED" ? `仅保留锚点参考；首个系统基线为 ${anchoredReference.system_baseline_date || "—"}，缺锚点日分券商 NAV，未跨缺口续算` : "等待锚点后的完整系统日终续算"} · 累计 ${anchoredReference ? pct(anchoredReference.futu_cumulative, 1) : "—"} · ${manual.start_date || "—"}—${anchoredReference?.end_date || liveTime(manual.as_of)} · 混合方法估算`,
             });
             const calculated = row.calculated_return || {};
             const governed = calculated.contract_id === BROKER_RETURN_CONTRACT.id
@@ -2223,13 +2223,9 @@ function renderLiveTrading(trading) {
   }
   const target = liveTarget(trading);
   const signal = liveSignal(trading);
-  const financial = liveFinancialComplete({
-    live,
-    transportStatus: liveRuntime.transportStatus,
-    staleAfterMs: 10 * 60_000,
-  });
-  const cashflowValue = live?.cashflow_generated ?? live?.confirmed_cashflow_generated;
-  const cashflowComplete = live?.cashflow_generated !== null && live?.cashflow_generated !== undefined;
+  const cashflowDisplay = resolveLiveCashflowDisplay(live);
+  const cashflowValue = cashflowDisplay.value;
+  const cashflowComplete = cashflowDisplay.complete;
   const cashflowScopeComplete = live?.active_scope_coverage_status === "COMPLETE";
   const realizedTrading = resolveLiveRealizedTradingDisplay(live);
   const realizedTradingValue = realizedTrading.net;
@@ -2246,7 +2242,7 @@ function renderLiveTrading(trading) {
   append(
     heading,
     el("p", "eyebrow", "LIVE · PROVISIONAL"),
-    el("h2", "", `${live?.monitoring_day || "本日"} 截至当前交易实绩`),
+    el("h2", "", `${live?.monitoring_day || "本日"} 截至当前生活现金流与交易实绩`),
     el(
       "p",
       "live-trading-window",
@@ -2274,23 +2270,25 @@ function renderLiveTrading(trading) {
   const primary = el("div", "live-primary");
   const primaryValue = el(
     "strong",
-    Number(realizedTradingValue) < 0 ? "negative" : Number(realizedTradingValue) > 0 ? "positive" : "",
-    usd(realizedTradingValue),
+    Number(cashflowValue) < 0 ? "negative" : Number(cashflowValue) > 0 ? "positive" : "",
+    usd(cashflowValue),
   );
   const primaryCopy = el("div");
   append(
     primaryCopy,
     term(
-      realizedTradingComplete ? "截至当前已实现交易净收益" : "截至当前可确认已实现交易净收益",
-      TERM_DEFINITIONS.provisionalRealizedTradingPnl,
+      cashflowDisplay.includesInterest
+        ? cashflowComplete ? "截至当前生活开支评估净现金流" : "截至当前可确认生活净现金流"
+        : "截至当前可确认现金流创造（利息待确认）",
+      TERM_DEFINITIONS.generatedCashflow,
       "live-primary-label",
     ),
     el(
       "span",
       "",
-      realizedTradingComplete
-        ? `${live?.realized_trading_cycle_count ?? 0} 个已实现片段；部分减仓即时计入，不等待整仓归零或日终`
-        : `Realized 覆盖不完整；仅显示成本与费用可证明的小计。${financial.reason}`,
+      cashflowDisplay.includesInterest
+        ? `${cashflowComplete ? "完整" : "可确认"}主动股票、期权、税后股息与已入账账户利息；手续费和税费已包含在交易净收益中`
+        : "仅显示已实现且已归类的主动交易、期权与税后股息；融资/账户利息覆盖未确认",
     ),
   );
   append(primary, primaryCopy, primaryValue);
@@ -2300,18 +2298,14 @@ function renderLiveTrading(trading) {
   append(
     cashflowCopy,
     term(
-      cashflowComplete ? "已归类现金流创造" : "可确认现金流创造",
-      TERM_DEFINITIONS.generatedCashflow,
+      realizedTradingComplete ? "全部已实现交易净收益（审计）" : "可确认已实现交易净收益（审计）",
+      TERM_DEFINITIONS.provisionalRealizedTradingPnl,
       "live-cashflow-label",
     ),
     el(
       "small",
       "",
-      cashflowComplete
-        ? "仅含主动股票、期权与税后股息；用于生活现金流评估"
-        : !cashflowScopeComplete
-          ? `另有 ${live?.unclassified_overnight_realization_count || 0} 个隔夜实现片段待归类，不进入生活现金流`
-          : "来源不完整时只显示严格可确认小计",
+      `${live?.realized_trading_cycle_count ?? 0} 个成本与费用可证明的 realized fragment；包含待归类及长期资产处置，仅供交易审计，不自动进入生活现金流${!cashflowScopeComplete ? `；其中 ${live?.unclassified_overnight_realization_count || 0} 个隔夜片段待归类` : ""}`,
     ),
   );
   append(
@@ -2319,8 +2313,8 @@ function renderLiveTrading(trading) {
     cashflowCopy,
     el(
       "strong",
-      Number(cashflowValue) < 0 ? "negative" : Number(cashflowValue) > 0 ? "positive" : "",
-      usd(cashflowValue),
+      Number(realizedTradingValue) < 0 ? "negative" : Number(realizedTradingValue) > 0 ? "positive" : "",
+      usd(realizedTradingValue),
     ),
   );
 
@@ -2332,6 +2326,11 @@ function renderLiveTrading(trading) {
     ["待归类隔夜已实现", live?.unclassified_overnight_net_pnl, `${live?.unclassified_overnight_realization_count ?? "—"} 个片段；不进入生活现金流`],
     ["长期资产处置已实现", live?.long_term_realization_net_pnl, `${live?.long_term_realization_count ?? "—"} 个片段；不进入生活现金流`],
     ["税后已入账股息", live?.cashflow_dividend, "不含应收或未入账股息"],
+    [
+      live?.interest_coverage_status === "COMPLETE" ? "已入账融资 / 账户利息" : "融资 / 账户利息待确认",
+      live?.interest_coverage_status === "COMPLETE" ? live?.account_interest_cashflow : null,
+      "仅统计当前监控窗口已入账流水；未入账、应计或覆盖不完整不按零处理",
+    ],
     [
       executionFeesComplete ? "已成交订单手续费 / 税费" : "可确认已成交订单手续费 / 税费",
       executionFees === null ? null : -Math.abs(executionFees),

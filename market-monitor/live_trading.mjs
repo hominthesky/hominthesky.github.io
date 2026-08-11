@@ -58,6 +58,7 @@ const BROKER_CALCULATED_RETURN_REASONS = new Set([
 const MANUAL_RETURN_REFERENCE_FORMULA = "broker_app_reported_cash_weighted_return_and_interval_profit";
 const MANUAL_REFERENCE_START_DATE = "2026-01-01";
 const MANUAL_REFERENCE_ANCHOR_DATE = "2026-08-07";
+const MANUAL_REFERENCE_FIRST_POST_ANCHOR_SESSION = "2026-08-10";
 const MANUAL_REFERENCE_AS_OF = "2026-08-10T00:17:50-04:00";
 const ANCHORED_BROKER_RETURN_FORMULA = "(1+owner_confirmed_cash_weighted_return)*chain_link(post_anchor_modified_dietz_returns)-1; annualized_estimate=(1+anchored_cumulative)^(365/elapsed_calendar_days)-1";
 const PORTFOLIO_ANNUALIZED_REFERENCE_FORMULA = "sum(current_broker_nav/current_total_nav*broker_annualized_reference)";
@@ -165,6 +166,32 @@ export function resolveLiveRealizedTradingDisplay(live) {
   return { gross: null, fees: null, net: null, complete: false };
 }
 
+export function resolveLiveCashflowDisplay(live) {
+  const generated = nativeFiniteNumber(live?.cashflow_generated);
+  const confirmedGenerated = nativeFiniteNumber(live?.confirmed_cashflow_generated);
+  const interest = String(live?.interest_coverage_status || "").toUpperCase() === "COMPLETE"
+    ? nativeFiniteNumber(live?.account_interest_cashflow)
+    : null;
+  const living = nativeFiniteNumber(live?.living_expense_net_cashflow);
+  const confirmedLiving = nativeFiniteNumber(live?.confirmed_living_expense_net_cashflow);
+  const formalIdentity = generated !== null && interest !== null && living !== null
+    && Math.abs((generated + interest) - living) <= 0.01;
+  const confirmedIdentity = confirmedGenerated !== null && interest !== null && confirmedLiving !== null
+    && Math.abs((confirmedGenerated + interest) - confirmedLiving) <= 0.01;
+  if (formalIdentity) return {
+    value: living, generated, interest, complete: true, includesInterest: true,
+  };
+  if (confirmedIdentity) return {
+    value: confirmedLiving, generated: confirmedGenerated, interest,
+    complete: false, includesInterest: true,
+  };
+  if (confirmedGenerated !== null) return {
+    value: confirmedGenerated, generated: confirmedGenerated, interest: null,
+    complete: false, includesInterest: false,
+  };
+  return { value: null, generated: null, interest: null, complete: false, includesInterest: false };
+}
+
 export function anchoredPortfolioReturnReference(summary) {
   const rows = Array.isArray(summary?.broker_breakdown) ? summary.broker_breakdown : [];
   if (rows.length !== 2 || new Set(rows.map((row) => row?.broker)).size !== 2) return null;
@@ -177,16 +204,27 @@ export function anchoredPortfolioReturnReference(summary) {
   if (!manual || manual.verification_status !== "USER_CONFIRMED" || !calculated) return null;
   const manualReturn = nativeFiniteNumber(manual.cash_weighted_return);
   const anchor = manual.anchor_effective_date;
+  const accumulationDatesAbsent = calculated.start_date === null && calculated.end_date === null;
+  const accumulationSinglePoint = validManualDate(calculated.start_date)
+    && calculated.start_date === calculated.end_date
+    && [anchor, MANUAL_REFERENCE_FIRST_POST_ANCHOR_SESSION].includes(calculated.start_date);
   const noContinuationYet = calculated.coverage_status === "MISSING"
     && calculated.capital_flow_coverage_status === "UNKNOWN"
     && calculated.reason_codes?.length === 1
     && calculated.reason_codes[0] === "HISTORY_ACCUMULATING"
-    && ((calculated.start_date === null && calculated.end_date === null)
-      || (calculated.start_date === anchor && calculated.end_date === anchor));
+    && (accumulationDatesAbsent || accumulationSinglePoint);
   const completeContinuation = calculated.coverage_status === "COMPLETE"
     && calculated.capital_flow_coverage_status === "COMPLETE"
     && calculated.start_date === anchor && calculated.end_date >= anchor;
-  if (!noContinuationYet && !completeContinuation) return null;
+  const completeAfterGap = calculated.coverage_status === "COMPLETE"
+    && calculated.capital_flow_coverage_status === "COMPLETE"
+    && validManualDate(calculated.start_date) && validManualDate(calculated.end_date)
+    && calculated.start_date === MANUAL_REFERENCE_FIRST_POST_ANCHOR_SESSION
+    && calculated.end_date >= calculated.start_date
+    && nativeFiniteNumber(calculated.cumulative_total_return) !== null;
+  if (!noContinuationYet && !completeContinuation && !completeAfterGap) return null;
+  const requiresReanchor = completeAfterGap
+    || (accumulationSinglePoint && calculated.start_date > anchor);
   const postAnchor = completeContinuation
     ? nativeFiniteNumber(calculated.cumulative_total_return) : 0;
   if (manualReturn === null || postAnchor === null) return null;
@@ -223,6 +261,13 @@ export function anchoredPortfolioReturnReference(summary) {
     portfolio_reference_formula: PORTFOLIO_ANNUALIZED_REFERENCE_FORMULA,
     portfolio_reference_method: "CURRENT_NAV_WEIGHTED_ESTIMATE",
     portfolio_annualized_reference: Number.isFinite(combined) ? combined : null,
+    continuation_status: completeContinuation
+      ? "CONTINUING"
+      : requiresReanchor
+        ? "ANCHOR_ONLY_REANCHOR_REQUIRED"
+        : "ANCHOR_ONLY",
+    system_baseline_date: requiresReanchor ? calculated.start_date : anchor,
+    system_observed_through: requiresReanchor ? calculated.end_date : end,
     start_date: start,
     anchor_effective_date: anchor,
     end_date: end,
@@ -1190,6 +1235,10 @@ export function liveFinancialFingerprint(live) {
     long_term_realization_net_pnl: live.long_term_realization_net_pnl ?? null,
     cashflow_generated: live.cashflow_generated ?? null,
     confirmed_cashflow_generated: live.confirmed_cashflow_generated ?? null,
+    account_interest_cashflow: live.account_interest_cashflow ?? null,
+    living_expense_net_cashflow: live.living_expense_net_cashflow ?? null,
+    confirmed_living_expense_net_cashflow: live.confirmed_living_expense_net_cashflow ?? null,
+    interest_coverage_status: live.interest_coverage_status ?? null,
     cashflow_active_equity_net_pnl: live.cashflow_active_equity_net_pnl ?? null,
     cashflow_dividend: live.cashflow_dividend ?? null,
     intraday: category(live.intraday),
