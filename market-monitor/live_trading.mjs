@@ -4,7 +4,7 @@ export const MANUAL_REFRESH_TIMEOUT_MS = 30_000;
 export const DEFAULT_MONTHLY_TARGET_CNY = 40_000;
 export const PORTFOLIO_GATE_STALE_AFTER_MS = 10 * 60_000;
 export const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60_000;
-export const LIVING_EXPENSE_COVERAGE_CONTRACT_ID = "living_expense_coverage_v1";
+export const LIVING_EXPENSE_COVERAGE_CONTRACT_ID = "living_expense_coverage_v2";
 export const LIVING_EXPENSE_COVERAGE_FORMULA =
   "max(living_expense_net_cashflow_usd * usd_cny_rate, 0) / living_expense_target_cny";
 
@@ -92,30 +92,17 @@ export function resolveTradingCashflow(period) {
 
   let generated = null;
   if (realizedComplete && dividendComplete) {
-    generated = finiteNumber(period?.generated_cashflow);
-    if (generated === null) {
-      const activeNet = finiteNumber(period?.active_net_pnl) ?? (
-        finiteNumber(period?.intraday_net_pnl) !== null &&
-        finiteNumber(period?.option_net_pnl) !== null
-          ? finiteNumber(period.intraday_net_pnl) + finiteNumber(period.option_net_pnl)
-          : null
-      );
-      const dividend = finiteNumber(period?.dividend_cashflow);
-      if (activeNet !== null && dividend !== null) generated = activeNet + dividend;
-    }
+    generated = nativeFiniteNumber(period?.generated_cashflow);
   }
 
   let interest = null;
   if (interestComplete) {
-    interest = finiteNumber(period?.account_interest_cashflow) ??
-      finiteNumber(period?.interest_cashflow);
+    interest = nativeFiniteNumber(period?.account_interest_cashflow);
   }
 
   let living = null;
   if (generated !== null && interest !== null) {
-    living = finiteNumber(period?.living_expense_net_cashflow) ??
-      finiteNumber(period?.investable_cashflow) ??
-      generated + interest;
+    living = nativeFiniteNumber(period?.living_expense_net_cashflow);
   }
   return { generated, interest, living };
 }
@@ -136,8 +123,8 @@ export function periodDisplayGeneratedCashflow(period, periodComplete = false) {
 }
 
 const CASHFLOW_CHART_COMPONENTS = [
-  "intraday_net_pnl",
-  "overnight_equity_net_pnl",
+  "same_day_equity_net_pnl",
+  "active_residual_overnight_equity_net_pnl",
   "option_net_pnl",
   "dividend_cashflow",
   "account_interest_cashflow",
@@ -318,8 +305,8 @@ export function resolvePeriodCashflowDisplay(
   const interestComplete = Boolean(interestDeclaredComplete && interest !== null);
   const components = cashflowChartComponentValues(period, interest);
   const generatedComponents = [
-    components.intraday_net_pnl,
-    components.overnight_equity_net_pnl,
+    components.same_day_equity_net_pnl,
+    components.active_residual_overnight_equity_net_pnl,
     components.option_net_pnl,
     components.dividend_cashflow,
   ];
@@ -1239,9 +1226,11 @@ export function liveFinancialFingerprint(live) {
     living_expense_net_cashflow: live.living_expense_net_cashflow ?? null,
     confirmed_living_expense_net_cashflow: live.confirmed_living_expense_net_cashflow ?? null,
     interest_coverage_status: live.interest_coverage_status ?? null,
-    cashflow_active_equity_net_pnl: live.cashflow_active_equity_net_pnl ?? null,
+    cashflow_same_day_equity_net_pnl: live.cashflow_same_day_equity_net_pnl ?? null,
+    cashflow_active_residual_overnight_equity_net_pnl:
+      live.cashflow_active_residual_overnight_equity_net_pnl ?? null,
     cashflow_dividend: live.cashflow_dividend ?? null,
-    intraday: category(live.intraday),
+    same_day_equity: category(live.same_day_equity),
     options: category(live.options),
   });
 }
