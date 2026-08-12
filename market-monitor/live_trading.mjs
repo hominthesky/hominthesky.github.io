@@ -7,6 +7,12 @@ export const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60_000;
 export const LIVING_EXPENSE_COVERAGE_CONTRACT_ID = "living_expense_coverage_v2";
 export const LIVING_EXPENSE_COVERAGE_FORMULA =
   "max(living_expense_net_cashflow_usd * usd_cny_rate, 0) / living_expense_target_cny";
+export const CASHFLOW_GENERATION_CONTRACT_ID = "cashflow_generation_v4";
+export const CASHFLOW_GENERATION_FORMULA =
+  "same_day_equity_net_pnl + active_residual_overnight_equity_net_pnl + option_net_pnl + dividend_cashflow";
+export const LIVING_EXPENSE_CASHFLOW_CONTRACT_ID = "living_expense_net_cashflow_v2";
+export const LIVING_EXPENSE_CASHFLOW_FORMULA =
+  "generated_cashflow + account_interest_cashflow";
 
 const HEALTHY = "OK";
 const DEFAULT_EXPECTED_LIVE_BROKERS = ["Futu", "Tiger"];
@@ -83,6 +89,16 @@ export function isPeriodCoverageComplete(period) {
   return String(period?.coverage_status || "UNKNOWN").toUpperCase() === "COMPLETE";
 }
 
+function cashflowGenerationContractValid(row) {
+  return row?.cashflow_contract_id === CASHFLOW_GENERATION_CONTRACT_ID &&
+    row?.cashflow_formula === CASHFLOW_GENERATION_FORMULA;
+}
+
+function livingExpenseCashflowContractValid(row) {
+  return row?.living_expense_contract_id === LIVING_EXPENSE_CASHFLOW_CONTRACT_ID &&
+    row?.living_expense_formula === LIVING_EXPENSE_CASHFLOW_FORMULA;
+}
+
 export function resolveTradingCashflow(period) {
   const realizedComplete = period?.realized_coverage_status === "COMPLETE";
   const dividendComplete =
@@ -91,7 +107,7 @@ export function resolveTradingCashflow(period) {
     (period?.interest_coverage_status ?? period?.passive_cashflow_coverage_status) === "COMPLETE";
 
   let generated = null;
-  if (realizedComplete && dividendComplete) {
+  if (cashflowGenerationContractValid(period) && realizedComplete && dividendComplete) {
     generated = nativeFiniteNumber(period?.generated_cashflow);
   }
 
@@ -101,7 +117,7 @@ export function resolveTradingCashflow(period) {
   }
 
   let living = null;
-  if (generated !== null && interest !== null) {
+  if (livingExpenseCashflowContractValid(period) && generated !== null && interest !== null) {
     living = nativeFiniteNumber(period?.living_expense_net_cashflow);
   }
   return { generated, interest, living };
@@ -116,6 +132,7 @@ export function resolveTradingCashflow(period) {
  * boundary because JavaScript would otherwise coerce `true` to USD 1.
  */
 export function periodDisplayGeneratedCashflow(period, periodComplete = false) {
+  if (!cashflowGenerationContractValid(period)) return null;
   const field = periodComplete === true
     ? period?.generated_cashflow
     : period?.confirmed_generated_cashflow;
@@ -154,13 +171,19 @@ export function resolveLiveRealizedTradingDisplay(live) {
 }
 
 export function resolveLiveCashflowDisplay(live) {
-  const generated = nativeFiniteNumber(live?.cashflow_generated);
-  const confirmedGenerated = nativeFiniteNumber(live?.confirmed_cashflow_generated);
+  const generatedContractValid = cashflowGenerationContractValid(live);
+  const livingContractValid = livingExpenseCashflowContractValid(live);
+  const generated = generatedContractValid ? nativeFiniteNumber(live?.cashflow_generated) : null;
+  const confirmedGenerated = generatedContractValid
+    ? nativeFiniteNumber(live?.confirmed_cashflow_generated)
+    : null;
   const interest = String(live?.interest_coverage_status || "").toUpperCase() === "COMPLETE"
     ? nativeFiniteNumber(live?.account_interest_cashflow)
     : null;
-  const living = nativeFiniteNumber(live?.living_expense_net_cashflow);
-  const confirmedLiving = nativeFiniteNumber(live?.confirmed_living_expense_net_cashflow);
+  const living = livingContractValid ? nativeFiniteNumber(live?.living_expense_net_cashflow) : null;
+  const confirmedLiving = livingContractValid
+    ? nativeFiniteNumber(live?.confirmed_living_expense_net_cashflow)
+    : null;
   const formalIdentity = generated !== null && interest !== null && living !== null
     && Math.abs((generated + interest) - living) <= 0.01;
   const confirmedIdentity = confirmedGenerated !== null && interest !== null && confirmedLiving !== null
@@ -319,7 +342,9 @@ export function resolvePeriodCashflowDisplay(
     nativeFiniteNumber(period?.fees) !== null,
   );
   const generated = generatedComplete ? officialGenerated : confirmedGenerated;
-  const governedLiving = nativeFiniteNumber(period?.living_expense_net_cashflow);
+  const governedLiving = livingExpenseCashflowContractValid(period)
+    ? nativeFiniteNumber(period?.living_expense_net_cashflow)
+    : null;
   const derivedLiving = generated !== null && interest !== null ? generated + interest : null;
   const governedLivingValid = governedLiving !== null && officialGenerated !== null && interest !== null &&
     Math.abs(governedLiving - (officialGenerated + interest)) < 0.005;

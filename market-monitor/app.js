@@ -25,7 +25,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260813-1";
+} from "./live_trading.mjs?v=20260813-3";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -116,17 +116,17 @@ const TERM_DEFINITIONS = {
   grossTradingPnl:
     "已完成交易周期在扣除券商可取得手续费之前的收益。它用于解释成本侵蚀，不代表最终可支配现金。",
   netAfterCosts:
-    "策略现金流创造加上账户实际入账的融资、借券、现金余额及其他利息净额。融资主要服务长期持仓，不归因给股票同日匹配或期权策略，但会减少可用于生活开支评估的现金。",
+    "策略现金流创造加上账户实际入账的融资、借券、现金余额及其他利息净额。融资主要服务长期持仓，不归因给股票因果同日策略或期权策略，但会减少可用于生活开支评估的现金。",
   tradeWinRate:
     "盈利的已完成交易周期 ÷ 有明确盈亏的已完成周期。按周期而不是订单或成交笔数统计；样本少时容易失真。",
   profitFactor:
     "盈利周期净利润之和 ÷ 亏损周期净亏损绝对值。大于1表示样本期盈利覆盖亏损，小于1表示策略期望值需要复核。无亏损样本时不显示。",
   cashflowContribution:
-    "该来源净现金 ÷（股票同日匹配净收益＋已归类跨日残余净收益＋期权净收益＋税后已入账股息）。只在现金流创造总额大于零且来源完整时显示；融资利息不参与策略来源贡献分摊。",
+    "该来源净现金 ÷（股票因果同日策略净收益＋已归类跨日残余净收益＋期权净收益＋税后已入账股息）。只在现金流创造总额大于零且来源完整时显示；融资利息不参与策略来源贡献分摊。",
   dividendIncome:
     "已取得的 USD 现金股息减去股息预扣税，为税后股息分红现金流；不含股票送股、资本利得和未入账应收股息。",
   generatedCashflow:
-    "股票同日买卖覆盖量的 VWAP 策略归因、同日净额残余账中已归类主动的跨日实现、期权已实现片段扣除可取得交易费用后的净收益，加上税后已入账现金股息。用于衡量策略与股息的现金创造能力；不含融资利息、长期资产出售、本金周转和未实现盈亏。",
+    "股票按成交顺序形成的因果同日策略 realization、未匹配残余账中已归类主动的跨日实现、期权已实现片段扣除可取得交易费用后的净收益，加上税后已入账现金股息。普通卖出不会与未来买入倒配；用于衡量策略与股息的现金创造能力，不含融资利息、长期资产出售、本金周转和未实现盈亏。",
   livingExpenseCashflow:
     "现金流创造加上账户实际入账的利息净额。用于评估生活开支覆盖，但不等于券商安全可提现金额；实际提现还受结算现金、保证金安全垫和税务准备金约束。",
   portfolioNav:
@@ -1640,14 +1640,14 @@ function renderTradingPerformance(trading, portfolioSummary) {
       inputs,
       cashflowGroup(
         "股票主动交易",
-        `${number(period.same_day_equity_matched_set_count, 0)} 个同日匹配集合 + ${number(period.active_residual_overnight_equity_closed_trades, 0)} 个已归类跨日残余周期`,
+        `${number(period.same_day_equity_matched_set_count, 0)} 个因果同日 realization + ${number(period.active_residual_overnight_equity_closed_trades, 0)} 个已归类跨日残余周期`,
         "stock",
         [
           { label: "毛收益（未扣手续费）", value: period.active_equity_gross_pnl, definition: TERM_DEFINITIONS.grossTradingPnl },
           { label: "手续费成本", value: negativeMetric(period.active_equity_fees), definition: "已分摊到主动股票完整周期的佣金及费用，以负数显示。" },
           { label: "扣费后主动净收益", value: period.active_equity_net_pnl, definition: TERM_DEFINITIONS.netTradingPnl, primary: true },
         ],
-        `其中同日 VWAP 匹配 ${usd(period.same_day_equity_net_pnl)} · 已归类跨日残余 ${usd(period.active_residual_overnight_equity_net_pnl)} · 现金流贡献 ${pct(period.active_equity_cashflow_contribution)}`,
+        `其中因果同日策略 ${usd(period.same_day_equity_net_pnl)} · 已归类跨日残余 ${usd(period.active_residual_overnight_equity_net_pnl)} · 现金流贡献 ${pct(period.active_equity_cashflow_contribution)}`,
       ),
       cashflowGroup(
         "期权",
@@ -1910,7 +1910,7 @@ function renderTradingCashflowChart(trading) {
     );
     const details = el("div", "trading-chart-tooltip-details");
     [
-      ["股票同日匹配净收益", row.same_day_equity_net_pnl],
+      ["股票因果同日策略净收益", row.same_day_equity_net_pnl],
       ["已归类跨日残余净收益", row.active_residual_overnight_equity_net_pnl],
       ["期权净入账", row.option_net_pnl],
       ["税后股息", row.dividend_cashflow],
@@ -2014,7 +2014,7 @@ function renderTradingCashflowChart(trading) {
       "aria-label",
       `${row.fullLabel}，${row.generatedComplete ? "现金流创造" : "可确认现金流创造"} ${usd(row.value)}，` +
       `${row.livingComplete ? "生活开支评估净现金流" : "可确认生活净额"} ${usd(row.livingValue)}，` +
-      `股票同日匹配 ${usd(row.same_day_equity_net_pnl)}，已归类跨日残余 ${usd(row.active_residual_overnight_equity_net_pnl)}，期权 ${usd(row.option_net_pnl)}，` +
+      `股票因果同日策略 ${usd(row.same_day_equity_net_pnl)}，已归类跨日残余 ${usd(row.active_residual_overnight_equity_net_pnl)}，期权 ${usd(row.option_net_pnl)}，` +
       `税后股息 ${usd(row.dividend_cashflow)}，利息 ${usd(row.account_interest_cashflow)}，` +
       `手续费 ${usd(negativeMetric(row.fees))}`,
     );
@@ -2325,7 +2325,7 @@ function renderLiveTrading(trading) {
 
   const details = el("div", "live-detail-grid");
   [
-    ["股票同日匹配净收益", live?.same_day_equity?.net_pnl, `${live?.same_day_equity?.closed_trades ?? "—"} 个 VWAP 匹配集合；按同日买卖覆盖量归因`],
+    ["股票因果同日策略净收益", live?.same_day_equity?.net_pnl, `${live?.same_day_equity?.closed_trades ?? "—"} 个 realization；普通买入仅由后续卖出实现，可跨券商按标准化标的归因`],
     ["已归类跨日残余净收益", live?.cashflow_active_residual_overnight_equity_net_pnl, "仅计入同日净额残余账中已归类为主动交易的完成片段"],
     ["期权净入账", live?.options?.net_pnl, `${live?.options?.closed_trades ?? "—"} 个已实现片段`],
     ["待归类隔夜已实现", live?.unclassified_overnight_net_pnl, `${live?.unclassified_overnight_realization_count ?? "—"} 个片段；不进入生活现金流`],
