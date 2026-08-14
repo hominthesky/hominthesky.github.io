@@ -25,7 +25,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260813-3";
+} from "./live_trading.mjs?v=20260815-1";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -356,8 +356,18 @@ function liveTarget(trading) {
       live?.calendar?.scheduled_sessions_in_month ?? live?.scheduled_sessions_in_month,
     remainingSessionsInMonth: live?.target?.remaining_sessions_in_month,
     settledMtdActiveNetPnlUsd: live?.target?.settled_mtd_active_net_pnl_usd,
+    confirmedSettledMtdActiveNetPnlUsd:
+      live?.target?.confirmed_settled_mtd_active_net_pnl_usd,
+    confirmedReferenceCoverageStatus:
+      live?.target?.confirmed_reference_coverage_status,
+    excludedRealizationCount: live?.target?.excluded_realization_count,
+    excludedInstrumentCount: live?.target?.excluded_instrument_count,
+    excludedInstruments: live?.target?.excluded_instruments,
     settledThrough: live?.target?.settled_through,
     targetStatus: live?.target?.status ?? (Number(monthlyTargetCny) > 0 ? "OK" : "MISSING"),
+    targetContractId: live?.target?.contract_id,
+    targetFormula: live?.target?.formula,
+    confirmedReferenceFormula: live?.target?.confirmed_reference_formula,
     calendarStatus: live?.calendar?.status ?? live?.calendar_status,
     usdCnyRate: monitorData?.meta?.usd_cny_rate,
     fxStatus: deriveFxStatus({
@@ -2436,12 +2446,20 @@ function renderLiveTrading(trading) {
   append(
     targetHead,
     el("strong", "", "当日交易节奏参考"),
-    el("span", "", target.status === "OK" ? "可比较" : "数据不足，暂停达标判断"),
+    el("span", "", target.status === "OK"
+      ? "可比较"
+      : target.referenceAvailable
+        ? "可确认参考 · 不参与达标判断"
+        : "数据不足，暂停达标判断"),
   );
   const formula = el("p", "live-target-formula");
-  formula.textContent = target.remainingSessionsInMonth
+  formula.textContent = target.status === "OK" && target.remainingSessionsInMonth
     ? `（${cny(target.monthlyTargetCny)} − 本月已结算 ${cny(target.settledMtdActiveNetPnlCny)}）÷ ${target.remainingSessionsInMonth} 个剩余 NYSE 交易日（含今日）= ${cny(target.dailyTargetCny)} / 日${target.dailyTargetUsd !== null ? `（${usdExact(target.dailyTargetUsd)}）` : ""}`
-    : `${cny(target.monthlyTargetCny)} − 本月已结算收益；剩余 NYSE 交易日数待确认`;
+    : target.referenceAvailable
+      ? `（${cny(target.monthlyTargetCny)} − 本月可确认已结算 ${cny(target.confirmedSettledMtdActiveNetPnlCny)}）÷ ${target.remainingSessionsInMonth} 个剩余 NYSE 交易日（含今日）= 参考 ${cny(target.referenceDailyTargetCny)} / 日${target.referenceDailyTargetUsd !== null ? `（${usdExact(target.referenceDailyTargetUsd)}）` : ""}`
+      : target.remainingSessionsInMonth
+        ? `（${cny(target.monthlyTargetCny)} − 本月已结算 —）÷ ${target.remainingSessionsInMonth} 个剩余 NYSE 交易日（含今日）= — / 日`
+        : `${cny(target.monthlyTargetCny)} − 本月已结算收益；剩余 NYSE 交易日数待确认`;
   const targetNote = el("p", "live-target-note", target.reason);
   const preferences = el("div", "live-preferences");
   append(

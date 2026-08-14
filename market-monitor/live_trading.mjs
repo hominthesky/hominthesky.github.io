@@ -13,6 +13,11 @@ export const CASHFLOW_GENERATION_FORMULA =
 export const LIVING_EXPENSE_CASHFLOW_CONTRACT_ID = "living_expense_net_cashflow_v2";
 export const LIVING_EXPENSE_CASHFLOW_FORMULA =
   "generated_cashflow + account_interest_cashflow";
+export const DYNAMIC_DAILY_TARGET_CONTRACT_ID = "dynamic_daily_target_v5";
+export const DYNAMIC_DAILY_TARGET_FORMULA =
+  "max(monthly_target_cny - settled_mtd_active_net_pnl_usd * usd_cny_rate, 0) / remaining_sessions_in_month";
+export const DYNAMIC_DAILY_TARGET_CONFIRMED_REFERENCE_FORMULA =
+  "max(monthly_target_cny - confirmed_settled_mtd_active_net_pnl_usd * usd_cny_rate, 0) / remaining_sessions_in_month";
 
 const HEALTHY = "OK";
 const DEFAULT_EXPECTED_LIVE_BROKERS = ["Futu", "Tiger"];
@@ -905,8 +910,16 @@ export function calculateDailyTarget({
   scheduledSessionsInMonth,
   remainingSessionsInMonth,
   settledMtdActiveNetPnlUsd,
+  confirmedSettledMtdActiveNetPnlUsd,
+  confirmedReferenceCoverageStatus = "MISSING",
+  excludedRealizationCount = 0,
+  excludedInstrumentCount = 0,
+  excludedInstruments = [],
   settledThrough,
   targetStatus = "OK",
+  targetContractId = DYNAMIC_DAILY_TARGET_CONTRACT_ID,
+  targetFormula = DYNAMIC_DAILY_TARGET_FORMULA,
+  confirmedReferenceFormula = DYNAMIC_DAILY_TARGET_CONFIRMED_REFERENCE_FORMULA,
   calendarStatus,
   usdCnyRate,
   fxStatus,
@@ -917,10 +930,15 @@ export function calculateDailyTarget({
     remainingSessionsInMonth ?? scheduledSessionsInMonth,
   );
   const settledMtdUsd = finiteNumber(settledMtdActiveNetPnlUsd);
+  const confirmedSettledMtdUsd = finiteNumber(confirmedSettledMtdActiveNetPnlUsd);
   const rate = finiteNumber(usdCnyRate);
   const calendarHealth = status(calendarStatus);
   const targetHealth = status(targetStatus);
   const fxHealth = status(fxStatus);
+  const referenceCoverage = String(confirmedReferenceCoverageStatus || "MISSING").toUpperCase();
+  const contractValid = targetContractId === DYNAMIC_DAILY_TARGET_CONTRACT_ID &&
+    targetFormula === DYNAMIC_DAILY_TARGET_FORMULA &&
+    confirmedReferenceFormula === DYNAMIC_DAILY_TARGET_CONFIRMED_REFERENCE_FORMULA;
   const base = {
     monthlyTargetCny: monthly,
     scheduledSessionsInMonth: scheduledSessions,
@@ -931,16 +949,29 @@ export function calculateDailyTarget({
     settledThrough,
     dailyTargetCny: null,
     dailyTargetUsd: null,
+    referenceAvailable: false,
+    referenceCoverageStatus: referenceCoverage,
+    confirmedSettledMtdActiveNetPnlUsd: confirmedSettledMtdUsd,
+    confirmedSettledMtdActiveNetPnlCny: null,
+    referenceRemainingGapCny: null,
+    referenceDailyTargetCny: null,
+    referenceDailyTargetUsd: null,
+    excludedRealizationCount: Number.isInteger(excludedRealizationCount) && excludedRealizationCount >= 0
+      ? excludedRealizationCount : 0,
+    excludedInstrumentCount: Number.isInteger(excludedInstrumentCount) && excludedInstrumentCount >= 0
+      ? excludedInstrumentCount : 0,
+    excludedInstruments: Array.isArray(excludedInstruments)
+      ? excludedInstruments.filter((value) => typeof value === "string") : [],
     usdCnyRate: rate,
     fxStatus: fxHealth,
   };
 
-  if (targetHealth !== HEALTHY) {
+  if (!contractValid) {
     return {
       ...base,
-      status: targetHealth,
+      status: "MISSING",
       comparisonReady: false,
-      reason: "当日目标配置或月内结算覆盖不可用，暂停判断是否达标。",
+      reason: "当日目标金融契约不匹配，暂停计算与达标判断。",
     };
   }
   if (monthly === null || monthly <= 0) {
@@ -956,7 +987,6 @@ export function calculateDailyTarget({
     || remainingSessions === null
     || remainingSessions <= 0
     || !Number.isInteger(remainingSessions)
-    || settledMtdUsd === null
   ) {
     return {
       ...base,
@@ -971,6 +1001,43 @@ export function calculateDailyTarget({
       status: fxHealth === HEALTHY ? "MISSING" : fxHealth,
       comparisonReady: false,
       reason: "USD/CNY 汇率缺失或过期，暂停判断是否达标。",
+    };
+  }
+
+  if (targetHealth !== HEALTHY) {
+    if (referenceCoverage === "PARTIAL" && confirmedSettledMtdUsd !== null) {
+      const confirmedSettledMtdCny = confirmedSettledMtdUsd * rate;
+      const referenceGapCny = Math.max(monthly - confirmedSettledMtdCny, 0);
+      const referenceDailyTargetCny = referenceGapCny / remainingSessions;
+      const excluded = base.excludedRealizationCount;
+      const instruments = base.excludedInstruments.length
+        ? `（${base.excludedInstruments.join("、")}）`
+        : "";
+      return {
+        ...base,
+        status: targetHealth,
+        comparisonReady: false,
+        referenceAvailable: true,
+        confirmedSettledMtdActiveNetPnlCny: confirmedSettledMtdCny,
+        referenceRemainingGapCny: referenceGapCny,
+        referenceDailyTargetCny,
+        referenceDailyTargetUsd: referenceDailyTargetCny / rate,
+        reason: `月内另有 ${excluded} 个已实现片段${instruments}未完成策略覆盖；参考值只基于可确认收益，不参与达标或行动判断。`,
+      };
+    }
+    return {
+      ...base,
+      status: targetHealth,
+      comparisonReady: false,
+      reason: "当日目标配置或月内结算覆盖不可用，暂停判断是否达标。",
+    };
+  }
+  if (settledMtdUsd === null) {
+    return {
+      ...base,
+      status: "MISSING",
+      comparisonReady: false,
+      reason: "月内完整结算进度不可用，暂停判断是否达标。",
     };
   }
 
