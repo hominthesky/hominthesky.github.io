@@ -45,8 +45,8 @@ const LIVE_CLIENT = Object.freeze({
   challengeUrl: metaContent("zzao-live-challenge-url"),
   refreshUrl: metaContent("zzao-live-refresh-url"),
 });
-const STRATEGY_ANALYSIS_FORMULA = "bucket_actual_pct=classified_bucket/total_classified_long; rebalance_amount=total_classified_long*target_pct-classified_bucket";
-const STRATEGY_ANALYSIS_CONTRACT = "strategy_analysis_v1";
+const STRATEGY_ANALYSIS_FORMULA = "bucket_actual_pct=classified_bucket/total_classified_long; rebalance_amount=total_classified_long*target_pct-classified_bucket; portfolio_twr=portfolio_total_return_v1.cumulative_total_return; portfolio_mwr=portfolio_money_weighted_return_v1.money_weighted_return";
+const STRATEGY_ANALYSIS_CONTRACT = "strategy_analysis_v2";
 const liveRuntime = {
   transportStatus: LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING",
   pollState: LIVE_CLIENT.payloadUrl ? "idle" : "disabled",
@@ -2866,8 +2866,9 @@ function strategyTrendData(data) {
     };
   }
   const rows = Array.isArray(data.annual_returns) ? data.annual_returns : [];
+  const portfolioRows = Array.isArray(data.portfolio_returns) ? data.portfolio_returns : [];
   const benchmarks = Array.isArray(data.benchmarks) ? data.benchmarks : [];
-  const labels = [...new Set(rows.map((row) => String(row.year)))].sort();
+  const labels = [...new Set([...rows, ...portfolioRows].map((row) => String(row.year)))].sort();
   const definitions = [
     ["Futu TWR", "Futu", "twr", "#2563eb"],
     ["Futu MWR", "Futu", "mwr", "#60a5fa"],
@@ -2880,6 +2881,17 @@ function strategyTrendData(data) {
     color,
     values: labels.map((year) => rows.find((row) => row.broker === broker && row.year === Number(year))?.[field] ?? null),
   }));
+  for (const [label, field, color] of [
+    ["跨券商 TWR", "twr", "#047857"],
+    ["跨券商 MWR", "mwr", "#db2777"],
+  ]) {
+    series.push({
+      id: label,
+      label,
+      color,
+      values: labels.map((year) => portfolioRows.find((row) => row.year === Number(year))?.[field] ?? null),
+    });
+  }
   for (const ticker of ["SPY", "QQQ"]) {
     series.push({
       id: ticker,
@@ -2888,7 +2900,27 @@ function strategyTrendData(data) {
       values: labels.map((year) => benchmarks.find((row) => row.ticker === ticker && row.year === Number(year))?.return ?? null),
     });
   }
-  return { labels, series, note: "年度 TWR/MWR 为券商原生核验；SPY/QQQ 当前为价格回报，不含分红再投资。" };
+  const combined = portfolioRows.at(-1);
+  const combinedNote = combined
+    ? `跨券商系统值仅覆盖 ${combined.start_date}—${combined.end_date}${combined.coverage_status === "PARTIAL" ? "（部分年度）" : ""}；不平均券商百分比。`
+    : "跨券商共同日终历史或资金流覆盖不足，系统 TWR/MWR 保持未知。";
+  return { labels, series, note: `年度券商值为原生核验；${combinedNote} SPY/QQQ 为价格回报，不含分红再投资。` };
+}
+
+function selectedStrategySeries(trend) {
+  const available = trend.series.filter((series) => series.values.some(isFiniteMetric)).map((series) => series.id);
+  let stored = [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(`zzao-monitor-strategy-series-${strategyReturnCadence}`) || "[]");
+    stored = Array.isArray(parsed) ? parsed.filter((id) => available.includes(id)) : [];
+  } catch (_error) {
+    stored = [];
+  }
+  return stored.length ? stored : available;
+}
+
+function persistStrategySeries(ids) {
+  localStorage.setItem(`zzao-monitor-strategy-series-${strategyReturnCadence}`, JSON.stringify(ids));
 }
 
 function renderStrategyTrend(data) {
@@ -2913,7 +2945,31 @@ function renderStrategyTrend(data) {
     wrapper.appendChild(el("p", "empty-state", "收益历史不可用；不会以零补齐。"));
     return wrapper;
   }
-  const values = trend.series.flatMap((series) => series.values.filter(isFiniteMetric));
+  const selectedIds = selectedStrategySeries(trend);
+  const availableSeries = trend.series.filter((series) => series.values.some(isFiniteMetric));
+  const filter = el("div", "strategy-series-filter");
+  const allButton = el("button", "strategy-series-toggle", "全部");
+  allButton.type = "button";
+  allButton.setAttribute("aria-pressed", String(selectedIds.length === availableSeries.length));
+  allButton.addEventListener("click", () => { persistStrategySeries(availableSeries.map((series) => series.id)); renderStrategy(); });
+  filter.appendChild(allButton);
+  availableSeries.forEach((series) => {
+    const active = selectedIds.includes(series.id);
+    const button = el("button", "strategy-series-toggle");
+    button.type = "button";
+    button.setAttribute("aria-pressed", String(active));
+    const swatch = el("i", "strategy-legend-swatch"); swatch.style.background = series.color;
+    append(button, swatch, el("span", "", series.label));
+    button.addEventListener("click", () => {
+      const next = active ? selectedIds.filter((id) => id !== series.id) : [...selectedIds, series.id];
+      if (!next.length) return;
+      persistStrategySeries(next); renderStrategy();
+    });
+    filter.appendChild(button);
+  });
+  wrapper.appendChild(filter);
+  const visibleSeries = trend.series.filter((series) => selectedIds.includes(series.id));
+  const values = visibleSeries.flatMap((series) => series.values.filter(isFiniteMetric));
   if (!values.length) {
     wrapper.appendChild(el("p", "empty-state", "当前颗粒度没有可确认收益。"));
     return wrapper;
@@ -2950,7 +3006,7 @@ function renderStrategyTrend(data) {
     label.setAttribute("x", x(index)); label.setAttribute("y", height - 14); label.setAttribute("text-anchor", "middle");
     label.setAttribute("class", "strategy-axis-label"); label.textContent = labelText; svg.appendChild(label);
   });
-  for (const series of trend.series) {
+  for (const series of visibleSeries) {
     let segment = [];
     const flush = () => {
       if (!segment.length) return;
@@ -2970,7 +3026,7 @@ function renderStrategyTrend(data) {
   }
   wrapper.appendChild(svg);
   const legend = el("div", "strategy-legend");
-  trend.series.filter((series) => series.values.some(isFiniteMetric)).forEach((series) => {
+  visibleSeries.filter((series) => series.values.some(isFiniteMetric)).forEach((series) => {
     const item = el("span", "strategy-legend-item");
     const swatch = el("i", "strategy-legend-swatch"); swatch.style.background = series.color;
     append(item, swatch, el("span", "", series.label)); legend.appendChild(item);
@@ -3004,10 +3060,15 @@ function renderStrategyAllocation(data) {
     const amount = isFiniteMetric(bucket.rebalance_amount_usd)
       ? `${bucket.rebalance_amount_usd >= 0 ? "补足" : "降低"} ${usd(Math.abs(bucket.rebalance_amount_usd), true)}`
       : "差额未知";
+    const targetLine = el("p", "strategy-bucket-target");
+    targetLine.append(`目标 ${pct(bucket.target_pct)} · 偏离 `);
+    const gap = Number(bucket.gap_pct);
+    const gapText = isFiniteMetric(gap) ? `${gap > 0 ? "+" : ""}${pct(gap)}` : "—";
+    targetLine.appendChild(el("span", gap > 0 ? "strategy-deviation-positive" : gap < 0 ? "strategy-deviation-negative" : "strategy-deviation-neutral", gapText));
     append(card,
       el("p", "metric-label", bucket.bucket),
       el("strong", "strategy-bucket-value", pct(bucket.actual_pct)),
-      el("p", "strategy-bucket-target", `目标 ${pct(bucket.target_pct)} · 偏离 ${pct(bucket.gap_pct)}`),
+      targetLine,
       el("p", "strategy-bucket-action", amount),
     );
     const holdings = el("div", "strategy-holding-chips");
@@ -3019,7 +3080,18 @@ function renderStrategyAllocation(data) {
   }
   wrapper.appendChild(hierarchy);
   if ((allocation.unclassified || []).length) {
-    wrapper.appendChild(el("p", "strategy-unclassified", `另有 ${allocation.unclassified.length} 个未分类或非长期多头标的，未稀释三桶目标。`));
+    const details = el("details", "strategy-unclassified");
+    details.appendChild(el("summary", "", `另有 ${allocation.unclassified.length} 个未分类或非长期多头标的；展开查看为何不进入三桶分母。`));
+    const list = el("ul", "strategy-unclassified-list");
+    (allocation.unclassified || []).forEach((row) => {
+      const reason = row.reason_code === "UNCLASSIFIED_TICKER"
+        ? "正向长期持仓尚未映射策略桶"
+        : Number(row.shares) < 0
+          ? "空头腿，不属于长期多头策略分母"
+          : "期权或其它非长期多头腿，不属于三桶分母";
+      list.appendChild(el("li", "", `${row.ticker} · ${reason}`));
+    });
+    details.appendChild(list); wrapper.appendChild(details);
   }
   return wrapper;
 }
@@ -3071,6 +3143,7 @@ function renderStrategy() {
   const latestYear = annual.length ? Math.max(...annual.map((row) => row.year)) : null;
   const latestFutu = annual.find((row) => row.broker === "Futu" && row.year === latestYear);
   const latestTiger = annual.find((row) => row.broker === "Tiger" && row.year === latestYear);
+  const combined = Array.isArray(data.portfolio_returns) ? data.portfolio_returns.at(-1) : null;
   const hero = el("section", "strategy-hero");
   append(hero,
     el("div", "strategy-hero-copy", "把长期资产增长、不同券商策略实验和当前配置放在同一口径下复盘；不与生活现金流相加。"),
@@ -3079,6 +3152,7 @@ function renderStrategy() {
   root.appendChild(hero);
   const metrics = el("section", "strategy-summary-grid");
   const summaryRows = [
+    ["跨券商共同区间 TWR", combined ? pct(combined.twr) : "—", combined ? `MWR ${pct(combined.mwr)} · ${combined.start_date}—${combined.end_date}` : "共同日终历史或资金流覆盖不足"],
     ["Futu 最新 TWR", latestFutu ? pct(latestFutu.twr) : "—", latestFutu ? `MWR ${pct(latestFutu.mwr)} · ${latestFutu.coverage_status}` : "券商原生历史缺失"],
     ["Tiger 最新 TWR", latestTiger ? pct(latestTiger.twr) : "—", latestTiger ? `MWR ${pct(latestTiger.mwr)} · ${latestTiger.coverage_status}` : "券商原生历史缺失"],
     ["策略配置覆盖", data.allocation?.status || "MISSING", `${data.allocation?.classified_position_count ?? 0} 已分类 · ${data.allocation?.unclassified_position_count ?? 0} 未分类`],
