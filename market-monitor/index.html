@@ -15,9 +15,9 @@
     <title>市场杠杆与持仓风险监控</title>
     <link rel="icon" href="./favicon.ico?v=20260801-1" />
     <link rel="shortcut icon" href="./favicon.ico?v=20260801-1" />
-    <link rel="stylesheet" href="./styles.css?v=20260812-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260816-1" />
     <script src="./unlock_security.js?v=20260806-1"></script>
-    <script type="module" src="./app.js?v=20260815-1"></script>
+    <script type="module" src="./app.js?v=20260816-1"></script>
   </head>
   <body>
     <main id="unlock-view" class="unlock-view">
@@ -85,6 +85,11 @@
             <span class="drawer-label">交易复盘</span>
             <span id="trading-source-alert" class="tab-count"></span>
           </button>
+          <button id="nav-strategy" class="drawer-item" type="button" data-view="strategy">
+            <span class="drawer-icon" aria-hidden="true">◫</span>
+            <span class="drawer-label">组合策略</span>
+            <span id="strategy-source-alert" class="tab-count"></span>
+          </button>
         </nav>
 
         <div class="drawer-footer">
@@ -128,6 +133,9 @@
         </section>
         <section id="panel-trading" class="view-panel" aria-labelledby="nav-trading" hidden>
           <div id="trading-content"></div>
+        </section>
+        <section id="panel-strategy" class="view-panel" aria-labelledby="nav-strategy" hidden>
+          <div id="strategy-content"></div>
         </section>
 
         <footer>

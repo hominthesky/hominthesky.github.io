@@ -25,7 +25,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260815-1";
+} from "./live_trading.mjs?v=20260816-1";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -36,6 +36,7 @@ let livePollInFlight = null;
 let displayCurrency = localStorage.getItem("zzao-monitor-currency") || "USD";
 let activeView = localStorage.getItem("zzao-monitor-view") || "personal";
 let tradingChartCadence = localStorage.getItem("zzao-monitor-trading-chart") || "day";
+let strategyReturnCadence = localStorage.getItem("zzao-monitor-strategy-chart") || "year";
 
 const metaContent = (name) =>
   document.querySelector(`meta[name="${name}"]`)?.content?.trim() || "";
@@ -44,6 +45,8 @@ const LIVE_CLIENT = Object.freeze({
   challengeUrl: metaContent("zzao-live-challenge-url"),
   refreshUrl: metaContent("zzao-live-refresh-url"),
 });
+const STRATEGY_ANALYSIS_FORMULA = "bucket_actual_pct=classified_bucket/total_classified_long; rebalance_amount=total_classified_long*target_pct-classified_bucket";
+const STRATEGY_ANALYSIS_CONTRACT = "strategy_analysis_v1";
 const liveRuntime = {
   transportStatus: LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING",
   pollState: LIVE_CLIENT.payloadUrl ? "idle" : "disabled",
@@ -69,6 +72,11 @@ const VIEW_META = {
     eyebrow: "TRADING REVIEW",
     title: "交易复盘",
     subtitle: "现金创造、长期持仓融资与生活开支覆盖",
+  },
+  strategy: {
+    eyebrow: "PORTFOLIO STRATEGY",
+    title: "组合策略与投资成长",
+    subtitle: "跨券商收益、策略配置与长期投资能力复盘",
   },
 };
 
@@ -2839,6 +2847,308 @@ function renderMacro() {
   root.appendChild(sources);
 }
 
+function strategyTrendData(data) {
+  if (strategyReturnCadence === "month") {
+    const rows = Array.isArray(data.monthly_returns) ? data.monthly_returns : [];
+    const labels = [...new Set(rows.map((row) => row.period))].sort().slice(-24);
+    return {
+      labels,
+      series: [
+        ["Futu", "#2563eb"],
+        ["Tiger", "#d97706"],
+      ].map(([broker, color]) => ({
+        id: broker,
+        label: broker,
+        color,
+        values: labels.map((label) => rows.find((row) => row.broker === broker && row.period === label)?.return ?? null),
+      })),
+      note: "Futu 为券商月度展示收益，不可链式复原年度 TWR/MWR；Tiger 为日级 RoR 链式月度走势。",
+    };
+  }
+  const rows = Array.isArray(data.annual_returns) ? data.annual_returns : [];
+  const benchmarks = Array.isArray(data.benchmarks) ? data.benchmarks : [];
+  const labels = [...new Set(rows.map((row) => String(row.year)))].sort();
+  const definitions = [
+    ["Futu TWR", "Futu", "twr", "#2563eb"],
+    ["Futu MWR", "Futu", "mwr", "#60a5fa"],
+    ["Tiger TWR", "Tiger", "twr", "#d97706"],
+    ["Tiger MWR", "Tiger", "mwr", "#fbbf24"],
+  ];
+  const series = definitions.map(([label, broker, field, color]) => ({
+    id: label,
+    label,
+    color,
+    values: labels.map((year) => rows.find((row) => row.broker === broker && row.year === Number(year))?.[field] ?? null),
+  }));
+  for (const ticker of ["SPY", "QQQ"]) {
+    series.push({
+      id: ticker,
+      label: `${ticker} 价格回报`,
+      color: ticker === "SPY" ? "#64748b" : "#9333ea",
+      values: labels.map((year) => benchmarks.find((row) => row.ticker === ticker && row.year === Number(year))?.return ?? null),
+    });
+  }
+  return { labels, series, note: "年度 TWR/MWR 为券商原生核验；SPY/QQQ 当前为价格回报，不含分红再投资。" };
+}
+
+function renderStrategyTrend(data) {
+  const trend = strategyTrendData(data);
+  const wrapper = el("div", "strategy-trend");
+  const controls = el("div", "strategy-trend-controls");
+  for (const cadence of ["year", "month", "week"]) {
+    const button = el("button", "strategy-cadence", { year: "年", month: "月", week: "周" }[cadence]);
+    button.type = "button";
+    button.disabled = cadence === "week";
+    button.title = cadence === "week" ? "跨券商完整周收益历史仍在积累，保持未知" : "";
+    button.setAttribute("aria-pressed", String(strategyReturnCadence === cadence));
+    button.addEventListener("click", () => {
+      strategyReturnCadence = cadence;
+      localStorage.setItem("zzao-monitor-strategy-chart", cadence);
+      renderStrategy();
+    });
+    controls.appendChild(button);
+  }
+  wrapper.appendChild(controls);
+  if (!trend.labels.length) {
+    wrapper.appendChild(el("p", "empty-state", "收益历史不可用；不会以零补齐。"));
+    return wrapper;
+  }
+  const values = trend.series.flatMap((series) => series.values.filter(isFiniteMetric));
+  if (!values.length) {
+    wrapper.appendChild(el("p", "empty-state", "当前颗粒度没有可确认收益。"));
+    return wrapper;
+  }
+  const width = 1120;
+  const height = 360;
+  const margin = { top: 24, right: 24, bottom: 48, left: 70 };
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
+  const low = Math.min(0, ...values);
+  const high = Math.max(0, ...values);
+  const pad = Math.max((high - low) * 0.12, 0.02);
+  const yMin = low - pad;
+  const yMax = high + pad;
+  const x = (index) => margin.left + (trend.labels.length === 1 ? innerWidth / 2 : innerWidth * index / (trend.labels.length - 1));
+  const y = (value) => margin.top + innerHeight * (yMax - value) / (yMax - yMin);
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("strategy-trend-svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${strategyReturnCadence === "year" ? "年度" : "月度"}跨券商收益趋势`);
+  for (const tick of [yMin, 0, yMax]) {
+    const line = document.createElementNS(svg.namespaceURI, "line");
+    line.setAttribute("x1", margin.left); line.setAttribute("x2", width - margin.right);
+    line.setAttribute("y1", y(tick)); line.setAttribute("y2", y(tick)); line.setAttribute("class", "strategy-grid-line");
+    svg.appendChild(line);
+    const label = document.createElementNS(svg.namespaceURI, "text");
+    label.setAttribute("x", margin.left - 12); label.setAttribute("y", y(tick) + 5); label.setAttribute("text-anchor", "end");
+    label.setAttribute("class", "strategy-axis-label"); label.textContent = pct(tick, 0); svg.appendChild(label);
+  }
+  trend.labels.forEach((labelText, index) => {
+    if (trend.labels.length > 12 && index % Math.ceil(trend.labels.length / 8) !== 0 && index !== trend.labels.length - 1) return;
+    const label = document.createElementNS(svg.namespaceURI, "text");
+    label.setAttribute("x", x(index)); label.setAttribute("y", height - 14); label.setAttribute("text-anchor", "middle");
+    label.setAttribute("class", "strategy-axis-label"); label.textContent = labelText; svg.appendChild(label);
+  });
+  for (const series of trend.series) {
+    let segment = [];
+    const flush = () => {
+      if (!segment.length) return;
+      const path = document.createElementNS(svg.namespaceURI, "path");
+      path.setAttribute("d", segment.map((point, index) => `${index ? "L" : "M"}${point[0]} ${point[1]}`).join(" "));
+      path.setAttribute("fill", "none"); path.setAttribute("stroke", series.color); path.setAttribute("class", "strategy-series-line");
+      svg.appendChild(path); segment = [];
+    };
+    series.values.forEach((value, index) => {
+      if (!isFiniteMetric(value)) { flush(); return; }
+      segment.push([x(index), y(value)]);
+      const dot = document.createElementNS(svg.namespaceURI, "circle");
+      dot.setAttribute("cx", x(index)); dot.setAttribute("cy", y(value)); dot.setAttribute("r", 3.5);
+      dot.setAttribute("fill", series.color); svg.appendChild(dot);
+    });
+    flush();
+  }
+  wrapper.appendChild(svg);
+  const legend = el("div", "strategy-legend");
+  trend.series.filter((series) => series.values.some(isFiniteMetric)).forEach((series) => {
+    const item = el("span", "strategy-legend-item");
+    const swatch = el("i", "strategy-legend-swatch"); swatch.style.background = series.color;
+    append(item, swatch, el("span", "", series.label)); legend.appendChild(item);
+  });
+  wrapper.appendChild(legend);
+  wrapper.appendChild(el("p", "section-note", trend.note));
+  return wrapper;
+}
+
+function renderStrategyAllocation(data) {
+  const allocation = data.allocation || {};
+  const wrapper = el("div", "strategy-allocation");
+  if (allocation.status === "MISSING" || !(allocation.buckets || []).length) {
+    wrapper.appendChild(el("p", "empty-state", "最新跨券商持仓尚未完整取得；策略比例保持未知。"));
+    return wrapper;
+  }
+  const bar = el("div", "strategy-allocation-bar");
+  const bucketColors = { 高进攻: "#dc2626", 现金流支柱: "#15803d", 防御避险: "#2563eb" };
+  for (const bucket of allocation.buckets) {
+    const segment = el("div", "strategy-allocation-segment");
+    segment.style.width = `${Math.max(Number(bucket.actual_pct || 0) * 100, 0)}%`;
+    segment.style.background = bucketColors[bucket.bucket];
+    segment.title = `${bucket.bucket} ${pct(bucket.actual_pct)} · 目标 ${pct(bucket.target_pct)}`;
+    if (Number(bucket.actual_pct) >= 0.08) segment.textContent = `${bucket.bucket} ${pct(bucket.actual_pct, 0)}`;
+    bar.appendChild(segment);
+  }
+  wrapper.appendChild(bar);
+  const hierarchy = el("div", "strategy-bucket-grid");
+  for (const bucket of allocation.buckets) {
+    const card = el("article", `strategy-bucket-card ${bucket.status.toLowerCase()}`);
+    const amount = isFiniteMetric(bucket.rebalance_amount_usd)
+      ? `${bucket.rebalance_amount_usd >= 0 ? "补足" : "降低"} ${usd(Math.abs(bucket.rebalance_amount_usd), true)}`
+      : "差额未知";
+    append(card,
+      el("p", "metric-label", bucket.bucket),
+      el("strong", "strategy-bucket-value", pct(bucket.actual_pct)),
+      el("p", "strategy-bucket-target", `目标 ${pct(bucket.target_pct)} · 偏离 ${pct(bucket.gap_pct)}`),
+      el("p", "strategy-bucket-action", amount),
+    );
+    const holdings = el("div", "strategy-holding-chips");
+    (allocation.holdings || []).filter((row) => row.bucket === bucket.bucket).forEach((row) => {
+      holdings.appendChild(el("span", "strategy-holding-chip", `${row.ticker} ${pct(row.actual_pct)}`));
+    });
+    card.appendChild(holdings);
+    hierarchy.appendChild(card);
+  }
+  wrapper.appendChild(hierarchy);
+  if ((allocation.unclassified || []).length) {
+    wrapper.appendChild(el("p", "strategy-unclassified", `另有 ${allocation.unclassified.length} 个未分类或非长期多头标的，未稀释三桶目标。`));
+  }
+  return wrapper;
+}
+
+function renderStrategyInstrumentTypes(allocation) {
+  const rows = Array.isArray(allocation?.instrument_types) ? allocation.instrument_types : [];
+  const wrapper = el("div", "strategy-instrument-types");
+  if (!rows.length) {
+    wrapper.appendChild(el("p", "empty-state", "当前证券类型结构不可确认；不会以策略分类代替券商证券类型。"));
+    return wrapper;
+  }
+  const colors = { STOCK: "#2563eb", ETF: "#0f766e", FUND: "#7c3aed", BOND: "#b45309", REIT: "#be123c", ADR: "#4f46e5", OTHER: "#64748b" };
+  const labels = { STOCK: "股票", ETF: "ETF", FUND: "基金", BOND: "债券", REIT: "REIT", ADR: "ADR", OTHER: "其他" };
+  const bar = el("div", "strategy-type-bar");
+  rows.forEach((row) => {
+    const segment = el("div", "strategy-type-segment");
+    segment.style.width = `${Math.max(row.actual_pct * 100, 0)}%`;
+    segment.style.background = colors[row.instrument_type];
+    segment.title = `${labels[row.instrument_type]} ${pct(row.actual_pct)}`;
+    bar.appendChild(segment);
+  });
+  wrapper.appendChild(bar);
+  const legend = el("div", "strategy-type-grid");
+  rows.forEach((row) => {
+    const item = el("article", "strategy-type-item");
+    const marker = el("i", "strategy-type-marker");
+    marker.style.background = colors[row.instrument_type];
+    append(item, marker, el("span", "", labels[row.instrument_type]), el("strong", "", pct(row.actual_pct)), el("small", "", usd(row.market_value_usd, true)));
+    legend.appendChild(item);
+  });
+  wrapper.appendChild(legend);
+  return wrapper;
+}
+
+function strategyOriginalPnl(row) {
+  if (!isFiniteMetric(row?.pnl)) return "—";
+  return row.pnl_currency === "CNH" ? cny(row.pnl) : usdExact(row.pnl);
+}
+
+function renderStrategy() {
+  const root = byId("strategy-content");
+  root.replaceChildren();
+  const data = monitorData.strategy || {};
+  if (data.contract_id !== STRATEGY_ANALYSIS_CONTRACT || data.formula !== STRATEGY_ANALYSIS_FORMULA) {
+    root.appendChild(el("p", "empty-state", "组合策略数据契约不匹配，已停止展示派生指标。"));
+    return;
+  }
+  const annual = Array.isArray(data.annual_returns) ? data.annual_returns : [];
+  const latestYear = annual.length ? Math.max(...annual.map((row) => row.year)) : null;
+  const latestFutu = annual.find((row) => row.broker === "Futu" && row.year === latestYear);
+  const latestTiger = annual.find((row) => row.broker === "Tiger" && row.year === latestYear);
+  const hero = el("section", "strategy-hero");
+  append(hero,
+    el("div", "strategy-hero-copy", "把长期资产增长、不同券商策略实验和当前配置放在同一口径下复盘；不与生活现金流相加。"),
+    el("span", `status-pill ${data.status === "COMPLETE" ? "green" : "amber"}`, `${data.as_of || "—"} · ${data.status || "MISSING"}`),
+  );
+  root.appendChild(hero);
+  const metrics = el("section", "strategy-summary-grid");
+  const summaryRows = [
+    ["Futu 最新 TWR", latestFutu ? pct(latestFutu.twr) : "—", latestFutu ? `MWR ${pct(latestFutu.mwr)} · ${latestFutu.coverage_status}` : "券商原生历史缺失"],
+    ["Tiger 最新 TWR", latestTiger ? pct(latestTiger.twr) : "—", latestTiger ? `MWR ${pct(latestTiger.mwr)} · ${latestTiger.coverage_status}` : "券商原生历史缺失"],
+    ["策略配置覆盖", data.allocation?.status || "MISSING", `${data.allocation?.classified_position_count ?? 0} 已分类 · ${data.allocation?.unclassified_position_count ?? 0} 未分类`],
+  ];
+  summaryRows.forEach(([label, value, note]) => {
+    const card = el("article", "strategy-summary-card");
+    append(card, el("p", "metric-label", label), el("strong", "strategy-summary-value", value), el("p", "section-note", note));
+    metrics.appendChild(card);
+  });
+  root.appendChild(metrics);
+  const trend = section("跨券商收益与成长趋势", "年度看券商原生 TWR/MWR；月度只展示有证据支持的走势口径，缺失不补零。 ");
+  trend.appendChild(renderStrategyTrend(data)); root.appendChild(trend);
+
+  const brokerSection = section("逐券商策略复盘", "Futu 与 Tiger 独立解读，适合比较不同券商中试验的策略方向。 ");
+  const brokerGrid = el("div", "strategy-broker-grid");
+  const currentBrokers = Array.isArray(portfolioOverviewSummary?.broker_breakdown)
+    ? portfolioOverviewSummary.broker_breakdown : [];
+  for (const broker of ["Futu", "Tiger"]) {
+    const rows = annual.filter((row) => row.broker === broker).sort((a, b) => a.year - b.year)
+      .map((row) => ({ ...row, pnl_display: strategyOriginalPnl(row) }));
+    const current = currentBrokers.find((row) => row?.broker === broker);
+    const card = el("article", "strategy-broker-card");
+    const brokerHead = el("div", "strategy-broker-head");
+    append(brokerHead,
+      el("h3", "", broker),
+      el("span", "", `净资产 ${usd(current?.derived_nav_usd, true)} · 毛杠杆 ${isFiniteMetric(current?.gross_leverage) ? `${number(current.gross_leverage, 2)}x` : "—"}`),
+    );
+    card.appendChild(brokerHead);
+    card.appendChild(table([
+      { key: "year", label: "年度" },
+      { key: "twr", label: "TWR", numeric: true, render: pct },
+      { key: "mwr", label: "MWR", numeric: true, render: pct },
+      { key: "pnl_display", label: "券商年度盈亏", numeric: true },
+      { key: "coverage_status", label: "覆盖" },
+    ], rows));
+    (data.insights || []).filter((item) => item.scope === broker).forEach((item) => card.appendChild(el("p", "strategy-rule-note", item.body)));
+    brokerGrid.appendChild(card);
+  }
+  brokerSection.appendChild(brokerGrid); root.appendChild(brokerSection);
+
+  const allocation = section("当前策略结构", "三桶比例以已分类长期多头战略持仓市值为分母；现金、空头、期权和未知分类单列。 ");
+  allocation.appendChild(renderStrategyAllocation(data)); root.appendChild(allocation);
+
+  const instrumentTypes = section("当前证券类型结构", "以跨券商正向长期多头、非期权市值为分母；使用券商快照报告的证券类型，不从名称猜测。 ");
+  instrumentTypes.appendChild(renderStrategyInstrumentTypes(data.allocation)); root.appendChild(instrumentTypes);
+
+  const recommendations = section("政策偏离与复盘建议", "由 strategy_policy_v1 的固定阈值和文案模板生成，不依赖大模型，也不会自动下单。 ");
+  const insightList = el("div", "strategy-insight-list");
+  (data.insights || []).filter((item) => !["Futu", "Tiger"].includes(item.scope)).forEach((item) => {
+    const card = el("article", `strategy-insight ${item.severity.toLowerCase()}`);
+    append(card, el("span", "badge", item.severity), el("h3", "", item.headline), el("p", "", item.body), el("code", "", item.rule_id));
+    insightList.appendChild(card);
+  });
+  if (!insightList.childElementCount) insightList.appendChild(el("p", "empty-state", "当前没有达到偏离阈值的策略桶；仍需结合杠杆和未分类持仓复核。"));
+  recommendations.appendChild(insightList); root.appendChild(recommendations);
+
+  const quality = section("口径与数据健康", "不同收益口径不能相互替代。 ");
+  quality.appendChild(el("div", "strategy-quality-grid"));
+  const list = quality.querySelector(".strategy-quality-grid");
+  [
+    ["券商原生年度", "逐券商历史比较的主事实；2020 Futu 和当年 YTD 明确为部分年度。"],
+    ["Futu 月度展示", "截图月格不可链式复原年度 TWR/MWR，因此只做走势参考。"],
+    ["Tiger 日级走势", "从 2024-11-27 的真实非零起点计算；App 年度值仍独立保留。"],
+    ["SPY / QQQ", "当前为正常交易时段价格回报，不含分红再投资，不能称为总回报。"],
+  ].forEach(([label, body]) => {
+    const item = el("article", "strategy-quality-item"); append(item, el("strong", "", label), el("p", "", body)); list.appendChild(item);
+  });
+  root.appendChild(quality);
+}
+
 function setDrawerOpen(open) {
   const dashboard = byId("dashboard");
   dashboard.classList.toggle("drawer-open", open);
@@ -2890,6 +3200,7 @@ function setCurrency(currency) {
   renderPersonal();
   renderMacro();
   renderTrading();
+  renderStrategy();
 }
 
 function applyThemePreference(preference) {
@@ -2942,11 +3253,15 @@ function renderDashboard() {
   byId("trading-source-alert").textContent = failedBrokerSources
     ? `· ${failedBrokerSources}`
     : "";
+  byId("strategy-source-alert").textContent = monitorData.strategy?.status === "COMPLETE"
+    ? ""
+    : "· !";
   renderCurrencyControl();
   renderPortfolioOverview();
   renderPersonal();
   renderMacro();
   renderTrading();
+  renderStrategy();
   switchView(activeView);
 }
 
@@ -3048,6 +3363,7 @@ byId("lock-button").addEventListener("click", () => {
   byId("personal-content").replaceChildren();
   byId("macro-content").replaceChildren();
   byId("trading-content").replaceChildren();
+  byId("strategy-content").replaceChildren();
   byId("dashboard").hidden = true;
   byId("unlock-view").hidden = false;
   byId("password").focus();

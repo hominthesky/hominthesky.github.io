@@ -2584,6 +2584,107 @@ footer {
   .live-detail-item:last-child { border-bottom: 0; }
 }
 
+.strategy-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-2);
+}
+
+.strategy-hero-copy { max-width: 820px; color: var(--text-secondary); line-height: 1.65; }
+
+.strategy-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 24px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+}
+
+.strategy-summary-card { min-width: 0; padding: 20px 22px; border-right: 1px solid var(--line); }
+.strategy-summary-card:last-child { border-right: 0; }
+.strategy-summary-value { display: block; margin: 10px 0 6px; font-size: clamp(24px, 3vw, 34px); letter-spacing: -0.035em; }
+
+.strategy-trend { position: relative; }
+.strategy-trend-controls { display: flex; justify-content: flex-end; gap: 4px; margin: -48px 0 18px; }
+.strategy-cadence {
+  min-width: 44px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  background: transparent;
+  font-weight: 700;
+}
+.strategy-cadence[aria-pressed="true"] { border-color: var(--line-strong); color: var(--text); background: var(--surface-2); }
+.strategy-cadence:disabled { opacity: 0.45; cursor: not-allowed; }
+.strategy-trend-svg { display: block; width: 100%; min-height: 260px; }
+.strategy-grid-line { stroke: var(--line); stroke-width: 1; }
+.strategy-axis-label { fill: var(--muted); font-size: 13px; }
+.strategy-series-line { stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.strategy-legend { display: flex; flex-wrap: wrap; gap: 10px 20px; margin: 8px 0 10px; }
+.strategy-legend-item { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 13px; }
+.strategy-legend-swatch { display: inline-block; width: 24px; height: 3px; border-radius: 999px; }
+
+.strategy-broker-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.strategy-broker-card { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-2); }
+.strategy-broker-card h3 { margin: 0; }
+.strategy-broker-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 18px 20px 10px; }
+.strategy-broker-head span { color: var(--text-secondary); font-size: 12px; text-align: right; }
+.strategy-broker-card table { margin: 0; border: 0; border-radius: 0; }
+.strategy-rule-note { margin: 0; padding: 14px 20px 18px; border-top: 1px solid var(--line); color: var(--text-secondary); line-height: 1.6; }
+
+.strategy-allocation-bar { display: flex; min-height: 52px; overflow: hidden; border-radius: 12px; background: var(--surface-3); }
+.strategy-allocation-segment { display: grid; place-items: center; min-width: 0; padding: 0 8px; color: #fff; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.strategy-bucket-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+.strategy-bucket-card { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-2); }
+.strategy-bucket-card.rebalance_review { border-color: color-mix(in srgb, var(--red) 42%, var(--line)); }
+.strategy-bucket-card.watch { border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
+.strategy-bucket-value { display: block; margin: 10px 0 4px; font-size: 28px; }
+.strategy-bucket-target, .strategy-bucket-action { margin: 4px 0; color: var(--text-secondary); }
+.strategy-holding-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.strategy-holding-chip { padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-secondary); background: var(--card); font-size: 12px; }
+.strategy-unclassified { margin: 14px 0 0; padding: 12px 14px; border-left: 3px solid var(--amber); color: var(--text-secondary); background: var(--surface-2); }
+
+.strategy-type-bar { display: flex; height: 18px; overflow: hidden; border-radius: 999px; background: var(--surface-3); }
+.strategy-type-segment { min-width: 2px; }
+.strategy-type-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 14px; }
+.strategy-type-item { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+.strategy-type-item small { grid-column: 2 / -1; color: var(--muted); }
+.strategy-type-marker { width: 9px; height: 9px; border-radius: 50%; }
+
+.strategy-insight-list { display: grid; gap: 10px; }
+.strategy-insight { padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+.strategy-insight h3 { margin: 8px 0 6px; font-size: 17px; }
+.strategy-insight p { margin: 0 0 10px; color: var(--text-secondary); }
+.strategy-insight code { color: var(--muted); font-size: 11px; }
+.strategy-quality-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--line); }
+.strategy-quality-item { padding: 16px 18px; background: var(--surface-2); }
+.strategy-quality-item p { margin: 6px 0 0; color: var(--text-secondary); line-height: 1.55; }
+
+@media (max-width: 900px) {
+  .strategy-summary-grid, .strategy-bucket-grid { grid-template-columns: 1fr; }
+  .strategy-summary-card { border-right: 0; border-bottom: 1px solid var(--line); }
+  .strategy-summary-card:last-child { border-bottom: 0; }
+  .strategy-broker-grid, .strategy-quality-grid { grid-template-columns: 1fr; }
+  .strategy-trend-controls { justify-content: flex-start; margin: 0 0 14px; }
+}
+
+@media (max-width: 640px) {
+  .strategy-hero { align-items: flex-start; flex-direction: column; }
+  .strategy-broker-head { align-items: flex-start; flex-direction: column; }
+  .strategy-broker-head span { text-align: left; }
+  .strategy-allocation-bar { min-height: 38px; }
+  .strategy-allocation-segment { font-size: 0; }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .unlock-card,
   .tab-panel {
