@@ -3059,7 +3059,11 @@ function renderStrategyAllocation(data) {
     const card = el("article", `strategy-bucket-card ${bucket.status.toLowerCase()}`);
     const amount = isFiniteMetric(bucket.rebalance_amount_usd)
       ? `${bucket.rebalance_amount_usd >= 0 ? "补足" : "降低"} ${usd(Math.abs(bucket.rebalance_amount_usd), true)}`
-      : "差额未知";
+      : portfolioOverviewSummary?.portfolio_gate === "RED"
+        ? "红色风险闸门：暂停金额建议"
+        : allocation.status !== "COMPLETE"
+          ? "数据覆盖不足：金额暂缓"
+          : "金额建议暂不可用";
     const targetLine = el("p", "strategy-bucket-target");
     targetLine.append(`目标 ${pct(bucket.target_pct)} · 偏离 `);
     const gap = Number(bucket.gap_pct);
@@ -3171,7 +3175,7 @@ function renderStrategy() {
   const currentBrokers = Array.isArray(portfolioOverviewSummary?.broker_breakdown)
     ? portfolioOverviewSummary.broker_breakdown : [];
   for (const broker of ["Futu", "Tiger"]) {
-    const rows = annual.filter((row) => row.broker === broker).sort((a, b) => a.year - b.year)
+    const rows = annual.filter((row) => row.broker === broker).sort((a, b) => b.year - a.year)
       .map((row) => ({ ...row, pnl_display: strategyOriginalPnl(row) }));
     const current = currentBrokers.find((row) => row?.broker === broker);
     const card = el("article", "strategy-broker-card");

@@ -2619,6 +2619,7 @@ footer {
 .strategy-insight-list,
 .strategy-quality-grid {
   margin-right: 22px;
+  margin-bottom: 22px;
   margin-left: 22px;
 }
 .strategy-trend { position: relative; }
@@ -2709,7 +2710,7 @@ footer {
   .strategy-allocation,
   .strategy-instrument-types,
   .strategy-insight-list,
-  .strategy-quality-grid { margin-right: 16px; margin-left: 16px; }
+  .strategy-quality-grid { margin-right: 16px; margin-bottom: 16px; margin-left: 16px; }
 }
 
 @media (max-width: 640px) {
