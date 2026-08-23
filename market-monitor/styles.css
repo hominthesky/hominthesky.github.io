@@ -2773,6 +2773,15 @@ footer {
 .holdings-table-wrap table { min-width: 1060px; }
 .holdings-table-wrap th,
 .holdings-table-wrap td { padding: 12px 13px; }
+.holdings-ledger-table { min-width: 1420px !important; }
+.holdings-ledger-table th:nth-child(-n + 4) { background: var(--surface-3); }
+.holdings-group-cell {
+  border-right: 1px solid var(--line);
+  background: var(--surface-2);
+  font-weight: 750;
+  vertical-align: middle;
+}
+.holdings-allocation-comparison { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; }
 .holdings-status {
   display: inline-flex;
   align-items: center;

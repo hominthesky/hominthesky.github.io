@@ -50,7 +50,7 @@ const holdingsFilters = {
   strategy: "ALL",
   instrument: "ALL",
   direction: "ALL",
-  group: "VALUE",
+  group: "STRATEGY",
 };
 
 const metaContent = (name) =>
@@ -3243,36 +3243,87 @@ function holdingStatusNode(status) {
   return node;
 }
 
-function renderHoldingsTable(host, rows, countNode) {
+function holdingDeviationNode(value) {
+  if (!isFiniteMetric(value)) return el("span", "strategy-deviation-neutral", "—");
+  const tone = value > 0
+    ? "strategy-deviation-positive"
+    : value < 0 ? "strategy-deviation-negative" : "strategy-deviation-neutral";
+  return el("span", tone, `${value > 0 ? "+" : ""}${pct(value)}`);
+}
+
+function appendHoldingCell(row, value, { numeric = false, rowSpan = 1, className = "" } = {}) {
+  const cell = el("td", `${numeric ? "num" : ""} ${className}`.trim());
+  if (rowSpan > 1) cell.rowSpan = rowSpan;
+  if (value instanceof Node) cell.appendChild(value);
+  else cell.textContent = value ?? "—";
+  row.appendChild(cell);
+}
+
+function renderHoldingsTable(host, rows, allocation, countNode) {
   const visibleRows = filterHoldingRows(rows, holdingsFilters);
   countNode.textContent = `显示 ${visibleRows.length} / ${rows.length} 项`;
   if (!visibleRows.length) {
     host.replaceChildren(el("p", "empty-state holdings-empty", "当前筛选条件下没有持仓。"));
     return;
   }
-  const displayRows = visibleRows.map((row) => ({
-    ...row,
-    strategy_display: holdingStrategyLabel(row.strategy_bucket),
-    instrument_display: row.instrument_type === "OPTION" ? "期权" : row.instrument_type,
-    direction_display: row.direction === "LONG" ? "多头" : "空头",
-    quantity_display: number(row.quantity, Math.abs(row.quantity % 1) > 0 ? 4 : 0),
-    value_display: usd(row.market_value_usd),
-    nav_display: pct(row.pct_nav),
-    sleeve_display: row.pct_classified_long === null ? "—" : pct(row.pct_classified_long),
-  }));
-  host.replaceChildren(table([
-    { key: "broker", label: "券商" },
-    { key: "strategy_display", label: "策略归属" },
-    { key: "ticker", label: "标的" },
-    { key: "instrument_display", label: "证券类型" },
-    { key: "direction_display", label: "方向" },
-    { key: "quantity_display", label: "持仓数", numeric: true },
-    { key: "value_display", label: `市值 ${displayCurrency}`, numeric: true },
-    { key: "nav_display", label: "占组合 NAV", numeric: true },
-    { key: "sleeve_display", label: "占三桶分母", numeric: true },
-    { key: "source_status", label: "来源", render: holdingStatusNode },
-  ], displayRows));
-  host.querySelector(".table-wrap")?.classList.add("holdings-table-wrap");
+  const allocationByBucket = new Map(
+    (allocation?.buckets || []).map((row) => [row.bucket, row]),
+  );
+  const mergeStrategy = holdingsFilters.group === "STRATEGY";
+  const groupSizes = new Map();
+  if (mergeStrategy) {
+    visibleRows.forEach((row) => groupSizes.set(
+      row.strategy_bucket,
+      (groupSizes.get(row.strategy_bucket) || 0) + 1,
+    ));
+  }
+  const wrap = el("div", "table-wrap holdings-table-wrap");
+  const tableNode = el("table", "holdings-ledger-table");
+  const thead = el("thead");
+  const headerRow = el("tr");
+  [
+    "策略归属", "目标配比", "实际配比", "漂移", "券商", "标的", "证券类型", "方向",
+    "持仓数", `市值 ${displayCurrency}`, "占组合 NAV", "占三桶分母", "来源",
+  ].forEach((label) => headerRow.appendChild(el("th", "", label)));
+  thead.appendChild(headerRow);
+  const tbody = el("tbody");
+  const emittedGroups = new Set();
+  visibleRows.forEach((row) => {
+    const tr = el("tr");
+    const firstInGroup = !mergeStrategy || !emittedGroups.has(row.strategy_bucket);
+    if (firstInGroup) {
+      emittedGroups.add(row.strategy_bucket);
+      const rowSpan = mergeStrategy ? groupSizes.get(row.strategy_bucket) : 1;
+      const allocationRow = allocationByBucket.get(row.strategy_bucket);
+      appendHoldingCell(tr, holdingStrategyLabel(row.strategy_bucket), {
+        rowSpan, className: "holdings-group-cell",
+      });
+      appendHoldingCell(tr, allocationRow?.target_pct === null
+        || allocationRow?.target_pct === undefined ? "—" : pct(allocationRow.target_pct), {
+        numeric: true, rowSpan, className: "holdings-group-cell",
+      });
+      appendHoldingCell(tr, allocationRow?.actual_pct === null
+        || allocationRow?.actual_pct === undefined ? "—" : pct(allocationRow.actual_pct), {
+        numeric: true, rowSpan, className: "holdings-group-cell",
+      });
+      appendHoldingCell(tr, holdingDeviationNode(allocationRow?.gap_pct), {
+        numeric: true, rowSpan, className: "holdings-group-cell",
+      });
+    }
+    appendHoldingCell(tr, row.broker);
+    appendHoldingCell(tr, row.ticker);
+    appendHoldingCell(tr, row.instrument_type === "OPTION" ? "期权" : row.instrument_type);
+    appendHoldingCell(tr, row.direction === "LONG" ? "多头" : "空头");
+    appendHoldingCell(tr, number(row.quantity, Math.abs(row.quantity % 1) > 0 ? 4 : 0), { numeric: true });
+    appendHoldingCell(tr, usd(row.market_value_usd), { numeric: true });
+    appendHoldingCell(tr, pct(row.pct_nav), { numeric: true });
+    appendHoldingCell(tr, row.pct_classified_long === null ? "—" : pct(row.pct_classified_long), { numeric: true });
+    appendHoldingCell(tr, holdingStatusNode(row.source_status));
+    tbody.appendChild(tr);
+  });
+  append(tableNode, thead, tbody);
+  wrap.appendChild(tableNode);
+  host.replaceChildren(wrap);
 }
 
 function renderHoldingsAllocation(data) {
@@ -3281,11 +3332,17 @@ function renderHoldingsAllocation(data) {
   const grid = el("div", "holdings-allocation-grid");
   for (const row of rows) {
     const card = el("article", "holdings-allocation-card");
+    const comparison = el("p", "section-note holdings-allocation-comparison");
+    append(
+      comparison,
+      document.createTextNode(`目标 ${pct(row.target_pct)} · 漂移 `),
+      holdingDeviationNode(row.gap_pct),
+    );
     append(
       card,
       el("span", "metric-label", row.bucket),
       el("strong", "holdings-allocation-value", pct(row.actual_pct)),
-      el("p", "section-note", `目标 ${pct(row.target_pct)} · 偏离 ${row.gap_pct === null ? "—" : pct(row.gap_pct)}`),
+      comparison,
     );
     grid.appendChild(card);
   }
@@ -3365,7 +3422,7 @@ function renderHoldings() {
   brokers.appendChild(brokerGrid);
   root.appendChild(brokers);
 
-  const ledger = section("跨券商持仓明细", "默认按市值从高到低；筛选和分组只改变展示，不会重算金额或策略归属。");
+  const ledger = section("跨券商持仓明细", "默认按策略合并行；目标、实际和漂移始终使用全组合三桶口径。筛选和分组只改变展示，不会重算金额或策略归属。");
   const controls = el("div", "holdings-controls");
   const searchLabel = el("label", "holdings-search-field");
   const search = el("input", "holdings-search-input");
@@ -3376,7 +3433,7 @@ function renderHoldings() {
   controls.appendChild(searchLabel);
   const tableHost = el("div", "holdings-table-host");
   const count = el("span", "holdings-result-count");
-  const updateTable = () => renderHoldingsTable(tableHost, rows, count);
+  const updateTable = () => renderHoldingsTable(tableHost, rows, data.allocation, count);
   search.addEventListener("input", () => { holdingsFilters.query = search.value; updateTable(); });
   const unique = (key) => [...new Set(rows.map((row) => row[key]).filter(Boolean))].sort();
   controls.appendChild(holdingFilterField("券商", holdingsFilters.broker,
@@ -3392,7 +3449,7 @@ function renderHoldings() {
     [["ALL", "全部"], ["LONG", "多头"], ["SHORT", "空头"]],
     (value) => { holdingsFilters.direction = value; updateTable(); }));
   controls.appendChild(holdingFilterField("排列", holdingsFilters.group,
-    [["VALUE", "按市值"], ["BROKER", "按券商"], ["STRATEGY", "按策略"]],
+    [["VALUE", "按市值"], ["BROKER", "按券商"], ["STRATEGY", "按策略（合并行）"]],
     (value) => { holdingsFilters.group = value; updateTable(); }));
   append(ledger, controls, count, tableHost);
   updateTable();
