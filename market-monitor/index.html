@@ -12,12 +12,13 @@
     <meta name="zzao-live-payload-url" content="https://monitor-live.zzao.im/v1/payload" />
     <meta name="zzao-live-challenge-url" content="https://monitor-live.zzao.im/v1/challenge" />
     <meta name="zzao-live-refresh-url" content="https://monitor-live.zzao.im/v1/refresh" />
+    <meta name="zzao-private-holdings-url" content="https://monitor-live.zzao.im/v1/holdings" />
     <title>市场杠杆与持仓风险监控</title>
     <link rel="icon" href="./favicon.ico?v=20260801-1" />
     <link rel="shortcut icon" href="./favicon.ico?v=20260801-1" />
-    <link rel="stylesheet" href="./styles.css?v=20260817-2" />
+    <link rel="stylesheet" href="./styles.css?v=20260823-1" />
     <script src="./unlock_security.js?v=20260806-1"></script>
-    <script type="module" src="./app.js?v=20260817-2"></script>
+    <script type="module" src="./app.js?v=20260823-1"></script>
   </head>
   <body>
     <main id="unlock-view" class="unlock-view">
@@ -74,6 +75,11 @@
             <span class="drawer-label">持仓风险</span>
             <span id="personal-tab-alert" class="tab-count"></span>
           </button>
+          <button id="nav-holdings" class="drawer-item" type="button" data-view="holdings">
+            <span class="drawer-icon" aria-hidden="true">▦</span>
+            <span class="drawer-label">持仓账本</span>
+            <span id="holdings-source-alert" class="tab-count"></span>
+          </button>
           <button id="nav-macro" class="drawer-item" type="button" data-view="macro">
             <span class="drawer-icon" aria-hidden="true">⌁</span>
             <span class="drawer-label">宏观与板块</span>
@@ -127,6 +133,9 @@
 
         <section id="panel-personal" class="view-panel" aria-labelledby="nav-personal">
           <div id="personal-content"></div>
+        </section>
+        <section id="panel-holdings" class="view-panel" aria-labelledby="nav-holdings" hidden>
+          <div id="holdings-content"></div>
         </section>
         <section id="panel-macro" class="view-panel" aria-labelledby="nav-macro" hidden>
           <div id="macro-content"></div>

@@ -26,6 +26,12 @@ import {
   yearSeriesScope,
   yearCoverageLabel,
 } from "./live_trading.mjs?v=20260816-1";
+import {
+  effectiveHoldingsStatus,
+  filterHoldingRows,
+  holdingStrategyLabel,
+  sanitizePrivateHoldings,
+} from "./holdings_ledger.mjs?v=20260823-1";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -33,10 +39,19 @@ let portfolioOverviewSummary = null;
 let unlockKey = null;
 let livePollTimer = null;
 let livePollInFlight = null;
+let holdingsRequestGeneration = 0;
 let displayCurrency = localStorage.getItem("zzao-monitor-currency") || "USD";
 let activeView = localStorage.getItem("zzao-monitor-view") || "personal";
 let tradingChartCadence = localStorage.getItem("zzao-monitor-trading-chart") || "day";
 let strategyReturnCadence = localStorage.getItem("zzao-monitor-strategy-chart") || "year";
+const holdingsFilters = {
+  query: "",
+  broker: "ALL",
+  strategy: "ALL",
+  instrument: "ALL",
+  direction: "ALL",
+  group: "VALUE",
+};
 
 const metaContent = (name) =>
   document.querySelector(`meta[name="${name}"]`)?.content?.trim() || "";
@@ -44,6 +59,7 @@ const LIVE_CLIENT = Object.freeze({
   payloadUrl: metaContent("zzao-live-payload-url"),
   challengeUrl: metaContent("zzao-live-challenge-url"),
   refreshUrl: metaContent("zzao-live-refresh-url"),
+  holdingsUrl: metaContent("zzao-private-holdings-url"),
 });
 const STRATEGY_ANALYSIS_FORMULA = "bucket_actual_pct=classified_bucket/total_classified_long; rebalance_amount=total_classified_long*target_pct-classified_bucket; portfolio_twr=portfolio_total_return_v1.cumulative_total_return; portfolio_mwr=portfolio_money_weighted_return_v1.money_weighted_return";
 const STRATEGY_ANALYSIS_CONTRACT = "strategy_analysis_v2";
@@ -56,12 +72,22 @@ const liveRuntime = {
   cooldownUntil: 0,
   pendingRefresh: null,
 };
+const holdingsRuntime = {
+  state: LIVE_CLIENT.holdingsUrl ? "idle" : "disabled",
+  data: null,
+  error: "",
+};
 
 const VIEW_META = {
   personal: {
     eyebrow: "PORTFOLIO RISK",
     title: "持仓风险",
     subtitle: "组合杠杆、风险预算与逐标的行动",
+  },
+  holdings: {
+    eyebrow: "PORTFOLIO LEDGER",
+    title: "持仓账本",
+    subtitle: "跨券商最近确认持仓、策略归属与组合结构",
   },
   macro: {
     eyebrow: "MARKET LEVERAGE",
@@ -741,6 +767,7 @@ async function checkLivePayload() {
     } finally {
       livePollInFlight = null;
       renderLiveOnly();
+      refreshHoldingsFreshnessDisplay();
     }
   })();
   return livePollInFlight;
@@ -785,6 +812,66 @@ async function deriveRefreshProof(challenge, requestPath) {
     new TextEncoder().encode(message),
   );
   return bytesB64Url(signature);
+}
+
+async function loadPrivateHoldings() {
+  if (!LIVE_CLIENT.challengeUrl || !LIVE_CLIENT.holdingsUrl || !unlockKey
+    || holdingsRuntime.state === "loading") return;
+  const requestGeneration = ++holdingsRequestGeneration;
+  holdingsRuntime.state = "loading";
+  holdingsRuntime.error = "";
+  renderHoldings();
+  try {
+    const holdingsPath = new URL(LIVE_CLIENT.holdingsUrl, window.location.href).pathname;
+    const challengeUrl = new URL(LIVE_CLIENT.challengeUrl, window.location.href);
+    challengeUrl.searchParams.set("path", holdingsPath);
+    const challengeResponse = await fetch(challengeUrl, {
+      cache: "no-store",
+      credentials: "omit",
+      headers: { Accept: "application/json" },
+    });
+    if (!challengeResponse.ok) throw new Error("无法取得持仓读取凭证。");
+    const challenge = await challengeResponse.json();
+    if (!unlockKey || requestGeneration !== holdingsRequestGeneration) return;
+    const proof = await deriveRefreshProof(challenge, holdingsPath);
+    const response = await fetch(LIVE_CLIENT.holdingsUrl, {
+      method: "POST",
+      credentials: "omit",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        nonce: challenge.nonce,
+        expires_at: challenge.expires_at,
+        proof,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!unlockKey || requestGeneration !== holdingsRequestGeneration) return;
+    if (!response.ok) throw new Error(payload.message || "精确持仓暂不可用。");
+    holdingsRuntime.data = sanitizePrivateHoldings(payload);
+    holdingsRuntime.state = "ready";
+  } catch (error) {
+    if (!unlockKey || requestGeneration !== holdingsRequestGeneration) return;
+    holdingsRuntime.data = null;
+    holdingsRuntime.state = "error";
+    holdingsRuntime.error = error instanceof Error ? error.message : "精确持仓暂不可用。";
+  }
+  renderHoldings();
+  renderHoldingsSourceAlert();
+}
+
+function renderHoldingsSourceAlert() {
+  byId("holdings-source-alert").textContent = holdingsRuntime.state === "ready"
+    && effectiveHoldingsStatus(holdingsRuntime.data) === "OK" ? "" : "· !";
+}
+
+function refreshHoldingsFreshnessDisplay() {
+  if (holdingsRuntime.state !== "ready" || !holdingsRuntime.data) return;
+  // Freshness changes with wall-clock time even when the underlying private
+  // file does not.  Re-evaluate on the existing live poll heartbeat so a
+  // loaded 29-minute snapshot cannot remain visually green after 30 minutes.
+  renderHoldings();
+  renderHoldingsSourceAlert();
 }
 
 async function requestManualRefresh() {
@@ -3135,6 +3222,203 @@ function strategyOriginalPnl(row) {
   return row.pnl_currency === "CNH" ? cny(row.pnl) : usdExact(row.pnl);
 }
 
+function holdingFilterField(labelText, value, options, onChange) {
+  const label = el("label", "holdings-filter-field");
+  const select = el("select", "holdings-filter-select");
+  options.forEach(([optionValue, optionLabel]) => {
+    const option = el("option", "", optionLabel);
+    option.value = optionValue;
+    option.selected = optionValue === value;
+    select.appendChild(option);
+  });
+  select.addEventListener("change", () => onChange(select.value));
+  append(label, el("span", "", labelText), select);
+  return label;
+}
+
+function holdingStatusNode(status) {
+  const normalized = String(status || "MISSING").toUpperCase();
+  const node = el("span", `holdings-status ${normalized.toLowerCase()}`, normalized);
+  node.setAttribute("aria-label", `来源状态 ${normalized}`);
+  return node;
+}
+
+function renderHoldingsTable(host, rows, countNode) {
+  const visibleRows = filterHoldingRows(rows, holdingsFilters);
+  countNode.textContent = `显示 ${visibleRows.length} / ${rows.length} 项`;
+  if (!visibleRows.length) {
+    host.replaceChildren(el("p", "empty-state holdings-empty", "当前筛选条件下没有持仓。"));
+    return;
+  }
+  const displayRows = visibleRows.map((row) => ({
+    ...row,
+    strategy_display: holdingStrategyLabel(row.strategy_bucket),
+    instrument_display: row.instrument_type === "OPTION" ? "期权" : row.instrument_type,
+    direction_display: row.direction === "LONG" ? "多头" : "空头",
+    quantity_display: number(row.quantity, Math.abs(row.quantity % 1) > 0 ? 4 : 0),
+    value_display: usd(row.market_value_usd),
+    nav_display: pct(row.pct_nav),
+    sleeve_display: row.pct_classified_long === null ? "—" : pct(row.pct_classified_long),
+  }));
+  host.replaceChildren(table([
+    { key: "broker", label: "券商" },
+    { key: "strategy_display", label: "策略归属" },
+    { key: "ticker", label: "标的" },
+    { key: "instrument_display", label: "证券类型" },
+    { key: "direction_display", label: "方向" },
+    { key: "quantity_display", label: "持仓数", numeric: true },
+    { key: "value_display", label: `市值 ${displayCurrency}`, numeric: true },
+    { key: "nav_display", label: "占组合 NAV", numeric: true },
+    { key: "sleeve_display", label: "占三桶分母", numeric: true },
+    { key: "source_status", label: "来源", render: holdingStatusNode },
+  ], displayRows));
+  host.querySelector(".table-wrap")?.classList.add("holdings-table-wrap");
+}
+
+function renderHoldingsAllocation(data) {
+  const allocation = data?.allocation || {};
+  const rows = Array.isArray(allocation.buckets) ? allocation.buckets : [];
+  const grid = el("div", "holdings-allocation-grid");
+  for (const row of rows) {
+    const card = el("article", "holdings-allocation-card");
+    append(
+      card,
+      el("span", "metric-label", row.bucket),
+      el("strong", "holdings-allocation-value", pct(row.actual_pct)),
+      el("p", "section-note", `目标 ${pct(row.target_pct)} · 偏离 ${row.gap_pct === null ? "—" : pct(row.gap_pct)}`),
+    );
+    grid.appendChild(card);
+  }
+  if (!grid.childElementCount) {
+    grid.appendChild(el("p", "empty-state", "策略分类覆盖不足，三桶结构暂不可确认。"));
+  }
+  return grid;
+}
+
+function renderHoldings() {
+  const root = byId("holdings-content");
+  root.replaceChildren();
+  if (holdingsRuntime.state !== "ready" || !holdingsRuntime.data) {
+    const message = holdingsRuntime.state === "loading"
+      ? "正在通过一次性凭证读取精确持仓…"
+      : holdingsRuntime.state === "error"
+        ? holdingsRuntime.error
+        : "精确持仓需要解锁后从鉴权只读通道获取。";
+    const state = el("section", "holdings-hero");
+    append(state, el("div", "", message));
+    if (["error", "idle"].includes(holdingsRuntime.state) && LIVE_CLIENT.holdingsUrl) {
+      const retry = el("button", "live-refresh-button", "重新读取");
+      retry.type = "button";
+      retry.addEventListener("click", () => { void loadPrivateHoldings(); });
+      state.appendChild(retry);
+    }
+    root.appendChild(state);
+    return;
+  }
+  const data = holdingsRuntime.data;
+  const summary = data.summary;
+  const dataset = data.holdings;
+  const rows = dataset.rows;
+  const sourceStatus = effectiveHoldingsStatus(data);
+
+  const hero = el("section", "holdings-hero");
+  const heroCopy = el("div");
+  append(
+    heroCopy,
+    el("strong", "", "最近确认的跨券商持仓快照"),
+    el("p", "", "解锁后从鉴权只读通道读取最近确认批次；不展示成本、未实现盈亏或账户标识。"),
+  );
+  append(
+    hero,
+    heroCopy,
+    el("span", `status-pill ${sourceStatus === "OK" ? "green" : "amber"}`, `${liveTime(summary.holdings_as_of || summary.source_retrieved_at)} · ${sourceStatus}`),
+  );
+  root.appendChild(hero);
+
+  const metrics = el("section", "holdings-summary-grid");
+  [
+    ["跨券商净资产", usd(summary.derived_nav_usd, true), "全部已接入券商 net liquidation"],
+    ["绝对毛敞口", usd(summary.gross_market_value_usd, true), "多空绝对值合计，不做方向抵消"],
+    ["组合毛杠杆", isFiniteMetric(summary.gross_leverage) ? `${number(summary.gross_leverage, 2)}x` : "—", `治理红线 ${number(summary.gross_leverage_red, 2)}x`],
+    ["当前持仓行", String(rows.length), "零数量行不进入账本"],
+  ].forEach(([label, value, note]) => {
+    const card = el("article", "holdings-summary-card");
+    append(card, el("p", "metric-label", label), el("strong", "holdings-summary-value", value), el("p", "section-note", note));
+    metrics.appendChild(card);
+  });
+  root.appendChild(metrics);
+
+  const brokers = section("分券商概览", "同一批次快照中的账户聚合；不公开账户号或账户别名。");
+  const brokerGrid = el("div", "holdings-broker-grid");
+  (summary.broker_breakdown || []).forEach((row) => {
+    const card = el("article", "holdings-broker-card");
+    append(
+      card,
+      el("div", "holdings-broker-name", row.broker),
+      el("strong", "holdings-broker-value", usd(row.derived_nav_usd, true)),
+      el("p", "section-note", `毛敞口 ${usd(row.gross_market_value_usd, true)} · 杠杆 ${isFiniteMetric(row.gross_leverage) ? `${number(row.gross_leverage, 2)}x` : "—"}`),
+      holdingStatusNode(row.source_status),
+    );
+    brokerGrid.appendChild(card);
+  });
+  if (!brokerGrid.childElementCount) brokerGrid.appendChild(el("p", "empty-state", "分券商快照暂不可用。"));
+  brokers.appendChild(brokerGrid);
+  root.appendChild(brokers);
+
+  const ledger = section("跨券商持仓明细", "默认按市值从高到低；筛选和分组只改变展示，不会重算金额或策略归属。");
+  const controls = el("div", "holdings-controls");
+  const searchLabel = el("label", "holdings-search-field");
+  const search = el("input", "holdings-search-input");
+  search.type = "search";
+  search.placeholder = "搜索 ticker";
+  search.value = holdingsFilters.query;
+  append(searchLabel, el("span", "", "标的"), search);
+  controls.appendChild(searchLabel);
+  const tableHost = el("div", "holdings-table-host");
+  const count = el("span", "holdings-result-count");
+  const updateTable = () => renderHoldingsTable(tableHost, rows, count);
+  search.addEventListener("input", () => { holdingsFilters.query = search.value; updateTable(); });
+  const unique = (key) => [...new Set(rows.map((row) => row[key]).filter(Boolean))].sort();
+  controls.appendChild(holdingFilterField("券商", holdingsFilters.broker,
+    [["ALL", "全部"], ...unique("broker").map((value) => [value, value])],
+    (value) => { holdingsFilters.broker = value; updateTable(); }));
+  controls.appendChild(holdingFilterField("策略", holdingsFilters.strategy,
+    [["ALL", "全部"], ...unique("strategy_bucket").map((value) => [value, holdingStrategyLabel(value)])],
+    (value) => { holdingsFilters.strategy = value; updateTable(); }));
+  controls.appendChild(holdingFilterField("类型", holdingsFilters.instrument,
+    [["ALL", "全部"], ...unique("instrument_type").map((value) => [value, value === "OPTION" ? "期权" : value])],
+    (value) => { holdingsFilters.instrument = value; updateTable(); }));
+  controls.appendChild(holdingFilterField("方向", holdingsFilters.direction,
+    [["ALL", "全部"], ["LONG", "多头"], ["SHORT", "空头"]],
+    (value) => { holdingsFilters.direction = value; updateTable(); }));
+  controls.appendChild(holdingFilterField("排列", holdingsFilters.group,
+    [["VALUE", "按市值"], ["BROKER", "按券商"], ["STRATEGY", "按策略"]],
+    (value) => { holdingsFilters.group = value; updateTable(); }));
+  append(ledger, controls, count, tableHost);
+  updateTable();
+  root.appendChild(ledger);
+
+  const allocation = section("三桶配置参照", "只复用组合策略页已经确认的已分类长期多头分母；空头、期权和未分类项不进入目标比例。");
+  allocation.appendChild(renderHoldingsAllocation({ allocation: data.allocation }));
+  root.appendChild(allocation);
+
+  const quality = section("数据健康与边界", "展开查看当前账本为什么可能不完整。");
+  const details = el("details", "holdings-quality");
+  const qualitySummary = el("summary", "", `${sourceStatus} · ${rows.length} 项持仓`);
+  const qualityList = el("ul", "holdings-quality-list");
+  [
+    `持仓时间：${liveTime(summary.holdings_as_of || summary.source_retrieved_at)}`,
+    `券商覆盖：${isFiniteMetric(summary.broker_coverage) ? pct(summary.broker_coverage, 0) : "—"}`,
+    `输入守恒：${dataset.input_count ?? "—"} = ${dataset.accepted_count ?? "—"} 接受 + ${dataset.excluded_zero_count ?? "—"} 零仓排除 + ${dataset.rejected_count ?? "—"} 拒绝`,
+    `策略分类：${data.allocation.status || "MISSING"}`,
+    `原因码：${dataset.reason_codes.length ? dataset.reason_codes.join("、") : "无"}`,
+    "不包含账户号、账户别名、合约 ID、成本、未实现盈亏或原始成交。",
+  ].forEach((item) => qualityList.appendChild(el("li", "", item)));
+  append(details, qualitySummary, qualityList);
+  quality.appendChild(details);
+  root.appendChild(quality);
+}
+
 function renderStrategy() {
   const root = byId("strategy-content");
   root.replaceChildren();
@@ -3250,6 +3534,9 @@ function switchView(view) {
   if (chartTooltip) chartTooltip.hidden = true;
   setDrawerOpen(false);
   window.scrollTo({ top: 0, behavior: "smooth" });
+  if (view === "holdings" && unlockKey && holdingsRuntime.state !== "loading") {
+    void loadPrivateHoldings();
+  }
 }
 
 function renderCurrencyControl() {
@@ -3276,6 +3563,7 @@ function setCurrency(currency) {
   renderCurrencyControl();
   renderPortfolioOverview();
   renderPersonal();
+  renderHoldings();
   renderMacro();
   renderTrading();
   renderStrategy();
@@ -3334,9 +3622,11 @@ function renderDashboard() {
   byId("strategy-source-alert").textContent = monitorData.strategy?.status === "COMPLETE"
     ? ""
     : "· !";
+  renderHoldingsSourceAlert();
   renderCurrencyControl();
   renderPortfolioOverview();
   renderPersonal();
+  renderHoldings();
   renderMacro();
   renderTrading();
   renderStrategy();
@@ -3361,6 +3651,7 @@ byId("unlock-form").addEventListener("submit", async (event) => {
     unlockKey = unlocked.key;
     passwordInput.value = "";
     renderDashboard();
+    void loadPrivateHoldings();
     byId("unlock-view").hidden = true;
     byId("dashboard").hidden = false;
     scheduleLivePolling(0);
@@ -3429,7 +3720,11 @@ document.addEventListener("visibilitychange", () => {
 
 byId("lock-button").addEventListener("click", () => {
   stopLivePolling();
+  holdingsRequestGeneration += 1;
   unlockKey = null;
+  holdingsRuntime.state = LIVE_CLIENT.holdingsUrl ? "idle" : "disabled";
+  holdingsRuntime.data = null;
+  holdingsRuntime.error = "";
   monitorData = null;
   portfolioOverviewSummary = null;
   liveRuntime.transportStatus = LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING";
@@ -3442,6 +3737,7 @@ byId("lock-button").addEventListener("click", () => {
   byId("macro-content").replaceChildren();
   byId("trading-content").replaceChildren();
   byId("strategy-content").replaceChildren();
+  byId("holdings-content").replaceChildren();
   byId("dashboard").hidden = true;
   byId("unlock-view").hidden = false;
   byId("password").focus();
