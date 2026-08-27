@@ -25,7 +25,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260816-1";
+} from "./live_trading.mjs?v=20260828-1";
 import {
   effectiveHoldingsStatus,
   filterHoldingRows,
@@ -535,10 +535,11 @@ function renderPortfolioOverview() {
   const riskSummary = monitorData.personal?.summary || {};
   const summary = portfolioOverviewSummary || {};
   const brokerRows = Array.isArray(summary.broker_breakdown)
-    ? summary.broker_breakdown.filter((row) => ["Futu", "Tiger"].includes(row?.broker))
+    ? summary.broker_breakdown.filter((row) => ["Futu", "Tiger", "IBKR"].includes(row?.broker))
     : [];
   const brokerByName = new Map(brokerRows.map((row) => [row.broker, row]));
-  const orderedBrokers = ["Futu", "Tiger"].map((broker) => brokerByName.get(broker)).filter(Boolean);
+  const orderedBrokers = ["Futu", "Tiger", "IBKR"]
+    .map((broker) => brokerByName.get(broker)).filter(Boolean);
   const portfolioReturn = riskSummary.portfolio_return || {};
   const governedReturn = portfolioReturn.contract_id === PORTFOLIO_RETURN_CONTRACT.id
     && portfolioReturn.formula === PORTFOLIO_RETURN_CONTRACT.formula;
@@ -550,6 +551,8 @@ function renderPortfolioOverview() {
     : null;
   const anchoredReference = anchoredPortfolioReturnReference(summary);
   const displayedAnnualized = annualized ?? anchoredReference?.portfolio_annualized_reference ?? null;
+  const referenceMissingBrokers = Array.isArray(anchoredReference?.missing_reference_brokers)
+    ? anchoredReference.missing_reference_brokers : [];
   const reasonCodes = Array.isArray(portfolioReturn.reason_codes)
     ? portfolioReturn.reason_codes
     : [];
@@ -561,7 +564,9 @@ function renderPortfolioOverview() {
     : "共同历史尚未建立";
   const returnNote = cumulative !== null
     ? `累计 ${pct(cumulative, 1)} · ${returnCoverage}${annualized === null ? ` · ${reason || "历史积累中"}` : ""}`
-    : `${reason || "共同历史积累中"} · 覆盖不足不估算`;
+    : `${reason || "共同历史积累中"} · 覆盖不足不估算${referenceMissingBrokers.length
+      ? ` · 参考缺口：${referenceMissingBrokers.join("/")} 年化尚未满足`
+      : ""}`;
   const head = el("div", "portfolio-overview-head");
   append(
     head,
@@ -639,20 +644,39 @@ function renderPortfolioOverview() {
             });
             return details;
           }
-          const native = row.native_return || {};
-          const nativeAnnualized = isFiniteMetric(native.annualized_total_return)
-            ? native.annualized_total_return : null;
-          return [nativeAnnualized === null
-            ? {
-                label: "Tiger · 原生",
-                value: "—",
-                note: "券商原生历史不可用",
-              }
-            : {
-                label: "Tiger · 原生",
-                value: pct(nativeAnnualized, 1),
-                note: `证券账户（SEC）原生 · 累计 ${pct(native.cumulative_total_return, 1)} · ${native.end_date || "—"}`,
-              }];
+          if (row.broker === "Tiger") {
+            const native = row.native_return || {};
+            const nativeAnnualized = isFiniteMetric(native.annualized_total_return)
+              ? native.annualized_total_return : null;
+            if (nativeAnnualized !== null) return [{
+              label: "Tiger · 原生",
+              value: pct(nativeAnnualized, 1),
+              note: `证券账户（SEC）原生 · 累计 ${pct(native.cumulative_total_return, 1)} · ${native.end_date || "—"}`,
+            }];
+          }
+          const calculated = row.calculated_return || {};
+          const governed = calculated.contract_id === BROKER_RETURN_CONTRACT.id
+            && calculated.formula === BROKER_RETURN_CONTRACT.formula
+            && calculated.method === "SYSTEM_CALCULATED"
+            && calculated.broker === row.broker;
+          const calculatedAnnualized = governed && isFiniteMetric(calculated.annualized_total_return)
+            ? calculated.annualized_total_return : null;
+          const calculatedCumulative = governed && isFiniteMetric(calculated.cumulative_total_return)
+            ? calculated.cumulative_total_return : null;
+          const calculatedReason = (Array.isArray(calculated.reason_codes) ? calculated.reason_codes : [])
+            .map((code) => PORTFOLIO_RETURN_REASON_LABELS[code])
+            .find(Boolean);
+          return [{
+            label: `${row.broker} · 系统`,
+            value: calculatedAnnualized !== null
+              ? pct(calculatedAnnualized, 1)
+              : calculatedCumulative !== null
+                ? `累计 ${pct(calculatedCumulative, 1)}`
+                : "—",
+            note: calculatedCumulative !== null
+              ? `系统自算 · ${calculatedReason || "满 30 个自然日后显示年化"} · ${calculated.start_date || "—"}—${calculated.end_date || "—"}`
+              : `系统自算 · ${calculatedReason === "共同历史积累中" ? "日终历史积累中" : calculatedReason || "日终历史积累中"}`,
+          }];
         }),
       },
     ),

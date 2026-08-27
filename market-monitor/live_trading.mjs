@@ -209,10 +209,17 @@ export function resolveLiveCashflowDisplay(live) {
 
 export function anchoredPortfolioReturnReference(summary) {
   const rows = Array.isArray(summary?.broker_breakdown) ? summary.broker_breakdown : [];
-  if (rows.length !== 2 || new Set(rows.map((row) => row?.broker)).size !== 2) return null;
+  const allowedBrokers = ["Futu", "Tiger", "IBKR"];
+  const brokerNames = rows.map((row) => row?.broker);
+  if (summary?.source_status !== "OK"
+    || rows.length < 2 || rows.length > allowedBrokers.length
+    || new Set(brokerNames).size !== rows.length
+    || !brokerNames.every((broker) => allowedBrokers.includes(broker))
+    || !["Futu", "Tiger"].every((broker) => brokerNames.includes(broker))
+    || rows.some((row) => row?.source_status !== "OK")) return null;
   const futu = rows.find((row) => row?.broker === "Futu");
   const tiger = rows.find((row) => row?.broker === "Tiger");
-  if (!futu || !tiger || futu.source_status !== "OK" || tiger.source_status !== "OK") return null;
+  if (!futu || !tiger) return null;
   const manual = safeManualReturnReference(futu.manual_return_reference, "Futu");
   const calculated = safeCalculatedBrokerReturn(futu.calculated_return, "Futu");
   const native = tiger?.native_return;
@@ -252,20 +259,38 @@ export function anchoredPortfolioReturnReference(summary) {
   const growth = (1 + manualReturn) * (1 + postAnchor);
   if (!Number.isFinite(growth) || growth <= 0) return null;
   const futuAnnualized = growth ** (365 / elapsed) - 1;
-  const futuNav = nativeFiniteNumber(futu?.derived_nav_usd);
-  const tigerNav = nativeFiniteNumber(tiger?.derived_nav_usd);
   const tigerAnnualized = native?.coverage_status === "COMPLETE"
     && native?.method === "BROKER_NATIVE" && native?.scope === "SEC"
     && validManualDate(native?.start_date) && validManualDate(native?.end_date)
     && native.start_date <= native.end_date
     ? nativeFiniteNumber(native.annualized_total_return) : null;
-  const totalNav = futuNav !== null && tigerNav !== null ? futuNav + tigerNav : null;
+  const annualizedByBroker = new Map([
+    ["Futu", Number.isFinite(futuAnnualized) ? futuAnnualized : null],
+    ["Tiger", tigerAnnualized],
+  ]);
+  const ibkr = rows.find((row) => row?.broker === "IBKR");
+  if (ibkr) {
+    const ibkrCalculated = safeCalculatedBrokerReturn(ibkr.calculated_return, "IBKR");
+    const ibkrAnnualized = ibkrCalculated?.coverage_status === "COMPLETE"
+      && ibkrCalculated.capital_flow_coverage_status === "COMPLETE"
+      ? nativeFiniteNumber(ibkrCalculated.annualized_total_return) : null;
+    annualizedByBroker.set("IBKR", ibkrAnnualized);
+  }
+  const navRows = rows.map((row) => ({
+    broker: row.broker,
+    nav: nativeFiniteNumber(row.derived_nav_usd),
+    annualized: annualizedByBroker.get(row.broker) ?? null,
+  }));
+  const totalNav = navRows.every((row) => row.nav !== null && row.nav > 0)
+    ? navRows.reduce((sum, row) => sum + row.nav, 0) : null;
   const declaredTotalNav = nativeFiniteNumber(summary?.derived_nav_usd);
   const navIdentityValid = totalNav !== null && declaredTotalNav !== null
     && Math.abs(totalNav - declaredTotalNav) < 0.005;
-  const combined = totalNav > 0 && futuNav > 0 && tigerNav > 0 && tigerAnnualized !== null
-    && navIdentityValid
-    ? (futuNav * futuAnnualized + tigerNav * tigerAnnualized) / totalNav : null;
+  const missingReferenceBrokers = navRows
+    .filter((row) => row.annualized === null)
+    .map((row) => row.broker);
+  const combined = totalNav > 0 && missingReferenceBrokers.length === 0 && navIdentityValid
+    ? navRows.reduce((sum, row) => sum + row.nav * row.annualized, 0) / totalNav : null;
   return {
     anchored_contract_id: "anchored_broker_return_v1",
     anchored_formula: ANCHORED_BROKER_RETURN_FORMULA,
@@ -276,6 +301,8 @@ export function anchoredPortfolioReturnReference(summary) {
     portfolio_reference_formula: PORTFOLIO_ANNUALIZED_REFERENCE_FORMULA,
     portfolio_reference_method: "CURRENT_NAV_WEIGHTED_ESTIMATE",
     portfolio_annualized_reference: Number.isFinite(combined) ? combined : null,
+    portfolio_reference_brokers: navRows.map((row) => row.broker),
+    missing_reference_brokers: missingReferenceBrokers,
     continuation_status: completeContinuation
       ? "CONTINUING"
       : requiresReanchor
