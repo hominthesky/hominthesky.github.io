@@ -18,6 +18,8 @@ export const DYNAMIC_DAILY_TARGET_FORMULA =
   "max(monthly_target_cny - settled_mtd_active_net_pnl_usd * usd_cny_rate, 0) / remaining_sessions_in_month";
 export const DYNAMIC_DAILY_TARGET_CONFIRMED_REFERENCE_FORMULA =
   "max(monthly_target_cny - confirmed_settled_mtd_active_net_pnl_usd * usd_cny_rate, 0) / remaining_sessions_in_month";
+export const BROKER_NATIVE_RETURN_FORMULA =
+  "native_interval_return; ibkr_annualized_reference=(1+native_twr)^(365/elapsed_calendar_days)-1";
 
 const HEALTHY = "OK";
 const DEFAULT_EXPECTED_LIVE_BROKERS = ["Futu", "Tiger"];
@@ -222,7 +224,7 @@ export function anchoredPortfolioReturnReference(summary) {
   if (!futu || !tiger) return null;
   const manual = safeManualReturnReference(futu.manual_return_reference, "Futu");
   const calculated = safeCalculatedBrokerReturn(futu.calculated_return, "Futu");
-  const native = tiger?.native_return;
+  const native = safeNativeBrokerReturn(tiger?.native_return, "Tiger");
   if (!manual || manual.verification_status !== "USER_CONFIRMED" || !calculated) return null;
   const manualReturn = nativeFiniteNumber(manual.cash_weighted_return);
   const anchor = manual.anchor_effective_date;
@@ -260,9 +262,6 @@ export function anchoredPortfolioReturnReference(summary) {
   if (!Number.isFinite(growth) || growth <= 0) return null;
   const futuAnnualized = growth ** (365 / elapsed) - 1;
   const tigerAnnualized = native?.coverage_status === "COMPLETE"
-    && native?.method === "BROKER_NATIVE" && native?.scope === "SEC"
-    && validManualDate(native?.start_date) && validManualDate(native?.end_date)
-    && native.start_date <= native.end_date
     ? nativeFiniteNumber(native.annualized_total_return) : null;
   const annualizedByBroker = new Map([
     ["Futu", Number.isFinite(futuAnnualized) ? futuAnnualized : null],
@@ -270,10 +269,13 @@ export function anchoredPortfolioReturnReference(summary) {
   ]);
   const ibkr = rows.find((row) => row?.broker === "IBKR");
   if (ibkr) {
+    const ibkrNative = safeNativeBrokerReturn(ibkr.native_return, "IBKR");
     const ibkrCalculated = safeCalculatedBrokerReturn(ibkr.calculated_return, "IBKR");
-    const ibkrAnnualized = ibkrCalculated?.coverage_status === "COMPLETE"
+    const ibkrNativeAnnualized = ibkrNative?.coverage_status === "COMPLETE"
+      ? nativeFiniteNumber(ibkrNative.annualized_total_return) : null;
+    const ibkrAnnualized = ibkrNativeAnnualized ?? (ibkrCalculated?.coverage_status === "COMPLETE"
       && ibkrCalculated.capital_flow_coverage_status === "COMPLETE"
-      ? nativeFiniteNumber(ibkrCalculated.annualized_total_return) : null;
+      ? nativeFiniteNumber(ibkrCalculated.annualized_total_return) : null);
     annualizedByBroker.set("IBKR", ibkrAnnualized);
   }
   const navRows = rows.map((row) => ({
@@ -822,6 +824,63 @@ function safeManualReturnReference(value, broker) {
   };
 }
 
+function safeNativeBrokerReturn(value, broker) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const expected = {
+    Futu: ["UNAVAILABLE", null, null, null],
+    Tiger: ["TIGER_ANALYTICS", "BROKER_DEFINED", "SEC", "BROKER_PROVIDED"],
+    IBKR: ["IBKR_FLEX_CHANGE_IN_NAV", "TWR", "UNIVERSAL_ACCOUNT", "ACT_365_FROM_NATIVE_TWR"],
+  }[broker];
+  if (!expected || value.contract_id !== "broker_native_return_v2" || value.broker !== broker) return null;
+  const coverage = String(value.coverage_status || "MISSING");
+  const method = String(value.method || "UNAVAILABLE");
+  const source = String(value.source || "UNAVAILABLE");
+  const measure = value.return_measure ?? null;
+  const scope = value.scope ?? null;
+  const annualization = value.annualization_method ?? null;
+  const reasons = Array.isArray(value.reason_codes) ? value.reason_codes : [];
+  const allowedReasons = new Set([
+    "BROKER_NATIVE_HISTORY_API_UNAVAILABLE", "BROKER_NATIVE_ANALYTICS_INCOMPLETE",
+    "BROKER_NATIVE_RETURN_DISABLED", "BROKER_NATIVE_RETURN_RUNTIMEERROR",
+    "MINIMUM_HISTORY_NOT_MET",
+  ]);
+  if (!["COMPLETE", "MISSING"].includes(coverage)
+    || !["BROKER_NATIVE", "UNAVAILABLE"].includes(method)
+    || [source, measure, scope, annualization].some((item, index) => item !== expected[index])
+    || reasons.some((code) => typeof code !== "string" || !allowedReasons.has(code))) return null;
+  const start = validManualDate(value.start_date) ? value.start_date : null;
+  const end = validManualDate(value.end_date) ? value.end_date : null;
+  const elapsed = Number.isInteger(value.elapsed_calendar_days) && value.elapsed_calendar_days >= 0
+    ? value.elapsed_calendar_days : null;
+  const count = Number.isInteger(value.observation_count) && value.observation_count >= 0
+    ? value.observation_count : null;
+  const cumulative = nativeFiniteNumber(value.cumulative_total_return);
+  const annualized = nativeFiniteNumber(value.annualized_total_return);
+  const expectedElapsed = start && end
+    ? Math.floor((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000)
+    : null;
+  const expectedAnnualized = broker === "IBKR" && elapsed >= 30 && cumulative > -1
+    ? (1 + cumulative) ** (365 / elapsed) - 1 : null;
+  if (coverage === "COMPLETE") {
+    if (method !== "BROKER_NATIVE" || !start || !end || start > end || elapsed === null
+      || elapsed <= 0 || elapsed !== expectedElapsed || count === null || count <= 0
+      || cumulative === null || cumulative <= -1
+      || (broker === "IBKR" && count !== 1)
+      || (elapsed >= 30 && (annualized === null || reasons.length))
+      || (broker === "IBKR" && expectedAnnualized !== null && Math.abs(annualized - expectedAnnualized) > 1e-8)
+      || (broker === "Tiger" && (annualized === null || reasons.length))
+      || (broker === "IBKR" && elapsed < 30 && (annualized !== null || reasons.length !== 1 || reasons[0] !== "MINIMUM_HISTORY_NOT_MET"))) return null;
+  } else if (method !== "UNAVAILABLE" || start !== null || end !== null || elapsed !== null
+    || count !== 0 || cumulative !== null || annualized !== null || reasons.length === 0) return null;
+  return {
+    contract_id: "broker_native_return_v2", broker, coverage_status: coverage, method,
+    source, return_measure: measure, scope, annualization_method: annualization,
+    start_date: start, end_date: end, elapsed_calendar_days: elapsed,
+    observation_count: count, cumulative_total_return: cumulative,
+    annualized_total_return: annualized, reason_codes: [...reasons],
+  };
+}
+
 function confirmedPortfolioOverviewCandidate(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   if (String(value.source_status || "").toUpperCase() !== HEALTHY) return null;
@@ -848,19 +907,7 @@ function confirmedPortfolioOverviewCandidate(value) {
     const rowLeverage = nativeFiniteNumber(row?.gross_leverage);
     if (row?.source_status !== "OK" || rowNav === null || rowNav <= 0
       || rowGross === null || rowGross < 0 || rowLeverage === null || rowLeverage < 0) return null;
-    const native = row?.native_return && typeof row.native_return === "object"
-      ? row.native_return : {};
-    const nativeComplete = native.coverage_status === "COMPLETE"
-      && native.method === "BROKER_NATIVE"
-      && native.scope === "SEC"
-      && nativeFiniteNumber(native.annualized_total_return) !== null
-      && nativeFiniteNumber(native.cumulative_total_return) !== null
-      && typeof native.observation_count === "number"
-      && Number.isInteger(native.observation_count)
-      && native.observation_count > 0
-      && /^\d{4}-\d{2}-\d{2}$/.test(String(native.start_date || ""))
-      && /^\d{4}-\d{2}-\d{2}$/.test(String(native.end_date || ""))
-      && native.start_date <= native.end_date;
+    const native = safeNativeBrokerReturn(row?.native_return, broker);
     const calculatedReturn = safeCalculatedBrokerReturn(row?.calculated_return, broker);
     const manualReference = safeManualReturnReference(row?.manual_return_reference, broker);
     if (calculatedReturn === null || manualReference === undefined) return null;
@@ -872,27 +919,7 @@ function confirmedPortfolioOverviewCandidate(value) {
       gross_leverage: rowLeverage,
       source_retrieved_at: row.source_retrieved_at ?? null,
       manual_return_reference: manualReference,
-      native_return: nativeComplete ? {
-        coverage_status: "COMPLETE",
-        method: "BROKER_NATIVE",
-        scope: "SEC",
-        start_date: native.start_date ?? null,
-        end_date: native.end_date ?? null,
-        observation_count: native.observation_count,
-        cumulative_total_return: nativeFiniteNumber(native.cumulative_total_return),
-        annualized_total_return: nativeFiniteNumber(native.annualized_total_return),
-        reason_codes: [],
-      } : {
-        coverage_status: "MISSING",
-        method: String(native.method || "UNAVAILABLE"),
-        scope: null,
-        start_date: null,
-        end_date: null,
-        observation_count: 0,
-        cumulative_total_return: null,
-        annualized_total_return: null,
-        reason_codes: Array.isArray(native.reason_codes) ? native.reason_codes.map(String) : [],
-      },
+      native_return: native,
       calculated_return: calculatedReturn,
     };
   });

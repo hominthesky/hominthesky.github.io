@@ -25,7 +25,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260828-1";
+} from "./live_trading.mjs?v=20260829-1";
 import {
   effectiveHoldingsStatus,
   filterHoldingRows,
@@ -644,16 +644,26 @@ function renderPortfolioOverview() {
             });
             return details;
           }
-          if (row.broker === "Tiger") {
-            const native = row.native_return || {};
-            const nativeAnnualized = isFiniteMetric(native.annualized_total_return)
-              ? native.annualized_total_return : null;
-            if (nativeAnnualized !== null) return [{
-              label: "Tiger · 原生",
-              value: pct(nativeAnnualized, 1),
-              note: `证券账户（SEC）原生 · 累计 ${pct(native.cumulative_total_return, 1)} · ${native.end_date || "—"}`,
-            }];
-          }
+          const details = [];
+          const native = row.native_return || {};
+          const nativeAnnualized = isFiniteMetric(native.annualized_total_return)
+            ? native.annualized_total_return : null;
+          const nativeCumulative = isFiniteMetric(native.cumulative_total_return)
+            ? native.cumulative_total_return : null;
+          if (native.coverage_status === "COMPLETE") details.push({
+            label: row.broker === "IBKR" ? "IBKR · 原生 TWR" : `${row.broker} · 原生`,
+            value: nativeAnnualized !== null ? pct(nativeAnnualized, 1) : "—",
+            note: nativeAnnualized !== null
+              ? `${row.broker === "IBKR" ? "Universal Account Flex 原生区间 TWR，ACT/365 年化参考" : "证券账户（SEC）券商原生年化"} · 累计 ${pct(nativeCumulative, 1)} · ${native.start_date || "—"}—${native.end_date || "—"}`
+              : `原生累计 ${pct(nativeCumulative, 1)} · 满 30 个自然日后显示 ACT/365 年化参考`,
+          });
+          else if (row.broker === "IBKR") details.push({
+            label: "IBKR · 原生 TWR",
+            value: "—",
+            note: (native.reason_codes || []).includes("BROKER_NATIVE_RETURN_DISABLED")
+              ? "原生收益通道未启用 · 待配置只读 Flex 报表"
+              : "原生收益报表未通过覆盖校验 · 与系统日终历史独立",
+          });
           const calculated = row.calculated_return || {};
           const governed = calculated.contract_id === BROKER_RETURN_CONTRACT.id
             && calculated.formula === BROKER_RETURN_CONTRACT.formula
@@ -666,7 +676,7 @@ function renderPortfolioOverview() {
           const calculatedReason = (Array.isArray(calculated.reason_codes) ? calculated.reason_codes : [])
             .map((code) => PORTFOLIO_RETURN_REASON_LABELS[code])
             .find(Boolean);
-          return [{
+          details.push({
             label: `${row.broker} · 系统`,
             value: calculatedAnnualized !== null
               ? pct(calculatedAnnualized, 1)
@@ -676,7 +686,8 @@ function renderPortfolioOverview() {
             note: calculatedCumulative !== null
               ? `系统自算 · ${calculatedReason || "满 30 个自然日后显示年化"} · ${calculated.start_date || "—"}—${calculated.end_date || "—"}`
               : `系统自算 · ${calculatedReason === "共同历史积累中" ? "日终历史积累中" : calculatedReason || "日终历史积累中"}`,
-          }];
+          });
+          return details;
         }),
       },
     ),
@@ -1343,9 +1354,9 @@ function renderPersonal() {
       metricCard(
         "券商账户净资产",
         usd(summary.derived_nav_usd, true),
-        "Futu/Tiger net liquidation 合计",
+        "全部已接入券商 net liquidation 合计",
         {
-          definition: "两家券商本次快照返回的账户净清算值合计，不含未接入的银行、基金或其它券商资产。",
+          definition: "全部预期券商本次快照返回的账户净清算值合计，不含未接入的银行、基金或其它券商资产。",
           meaning: "它是组合毛杠杆的分母；下降会使同样的毛敞口对应更高杠杆。",
           action: "与券商 App 的账户权益核对；来源不完整时不据此调整仓位。",
           tone: "tone-neutral",
@@ -1416,10 +1427,10 @@ function renderPersonal() {
         {
           priority_rank: 1,
           action_label: "先刷新券商数据",
-          entity_label: "Futu / Tiger",
+          entity_label: "全部预期券商",
           fact: `账户风险来源状态为 ${sourceStatus}，无法确认当前组合闸门。`,
           inference: "旧的持仓动作可能已过期，不应继续展示为当前建议。",
-          execution_condition: "两家券商来源均恢复为 OK，且账户快照不超过 10 分钟。",
+          execution_condition: "全部预期券商来源均恢复为 OK，且账户快照不超过 10 分钟。",
           action: "刷新券商账户净值、毛持仓与保证金信息；恢复前停止依据本页增加风险。",
         },
         ]
