@@ -11,6 +11,7 @@ import {
   calculateDailyTarget,
   calculateLivingExpenseCoverage,
   combineHealthStatuses,
+  currentPortfolioReturnReferenceSummary,
   deriveFxStatus,
   derivePortfolioGateInput,
   liveFinancialFingerprint,
@@ -25,7 +26,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260829-1";
+} from "./live_trading.mjs?v=20260831-1";
 import {
   effectiveHoldingsStatus,
   filterHoldingRows,
@@ -36,6 +37,7 @@ import {
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
 let portfolioOverviewSummary = null;
+let portfolioReturnReferenceSummary = null;
 let unlockKey = null;
 let livePollTimer = null;
 let livePollInFlight = null;
@@ -538,12 +540,19 @@ function renderPortfolioOverview() {
   root.replaceChildren();
   const riskSummary = monitorData.personal?.summary || {};
   const summary = portfolioOverviewSummary || {};
+  const referenceSummary = portfolioReturnReferenceSummary || {};
   const brokerRows = Array.isArray(summary.broker_breakdown)
     ? summary.broker_breakdown.filter((row) => ["Futu", "Tiger", "IBKR"].includes(row?.broker))
     : [];
   const brokerByName = new Map(brokerRows.map((row) => [row.broker, row]));
   const orderedBrokers = ["Futu", "Tiger", "IBKR"]
     .map((broker) => brokerByName.get(broker)).filter(Boolean);
+  const referenceRows = Array.isArray(referenceSummary.broker_breakdown)
+    ? referenceSummary.broker_breakdown.filter((row) => ["Futu", "Tiger", "IBKR"].includes(row?.broker))
+    : [];
+  const referenceByName = new Map(referenceRows.map((row) => [row.broker, row]));
+  const orderedReferenceBrokers = ["Futu", "Tiger", "IBKR"]
+    .map((broker) => referenceByName.get(broker)).filter(Boolean);
   const portfolioReturn = riskSummary.portfolio_return || {};
   const governedReturn = portfolioReturn.contract_id === PORTFOLIO_RETURN_CONTRACT.id
     && portfolioReturn.formula === PORTFOLIO_RETURN_CONTRACT.formula;
@@ -553,7 +562,7 @@ function renderPortfolioOverview() {
   const annualized = governedReturn && isFiniteMetric(portfolioReturn.annualized_total_return)
     ? portfolioReturn.annualized_total_return
     : null;
-  const anchoredReference = anchoredPortfolioReturnReference(summary);
+  const anchoredReference = anchoredPortfolioReturnReference(referenceSummary);
   const displayedAnnualized = annualized ?? anchoredReference?.portfolio_annualized_reference ?? null;
   const referenceMissingBrokers = Array.isArray(anchoredReference?.missing_reference_brokers)
     ? anchoredReference.missing_reference_brokers : [];
@@ -602,7 +611,7 @@ function renderPortfolioOverview() {
       {
         definition: TERM_DEFINITIONS.portfolioTotalReturn,
         tone: displayedAnnualized === null ? "" : displayedAnnualized >= 0 ? "positive" : "negative",
-        details: orderedBrokers.flatMap((row) => {
+        details: orderedReferenceBrokers.flatMap((row) => {
           if (row.broker === "Futu") {
             const details = [];
             const manual = row.manual_return_reference || {};
@@ -778,6 +787,7 @@ function mergeLivePayload(payload) {
       portfolioOverviewSummary,
       incomingRiskGate,
     );
+    portfolioReturnReferenceSummary = currentPortfolioReturnReferenceSummary(incomingRiskGate);
     monitorData.personal = applyLiveRiskGate(monitorData.personal, incomingRiskGate);
     monitorData.meta = {
       ...monitorData.meta,
@@ -3758,6 +3768,9 @@ byId("unlock-form").addEventListener("submit", async (event) => {
       null,
       monitorData.personal?.summary,
     );
+    portfolioReturnReferenceSummary = currentPortfolioReturnReferenceSummary(
+      monitorData.personal?.summary,
+    );
     unlockKey = unlocked.key;
     passwordInput.value = "";
     renderDashboard();
@@ -3837,6 +3850,7 @@ byId("lock-button").addEventListener("click", () => {
   holdingsRuntime.error = "";
   monitorData = null;
   portfolioOverviewSummary = null;
+  portfolioReturnReferenceSummary = null;
   liveRuntime.transportStatus = LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING";
   liveRuntime.pollState = LIVE_CLIENT.payloadUrl ? "idle" : "disabled";
   liveRuntime.refreshState = LIVE_CLIENT.refreshUrl ? "idle" : "disabled";

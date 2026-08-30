@@ -217,18 +217,17 @@ export function anchoredPortfolioReturnReference(summary) {
   const allowedBrokers = ["Futu", "Tiger", "IBKR"];
   const expectedBrokers = Array.isArray(summary?.expected_brokers) ? summary.expected_brokers : [];
   const brokerNames = rows.map((row) => row?.broker);
-  if (summary?.source_status !== "OK"
+  if (!["OK", "PARTIAL"].includes(summary?.source_status)
     || rows.length < 2 || rows.length > allowedBrokers.length
     || new Set(brokerNames).size !== rows.length
     || !brokerNames.every((broker) => allowedBrokers.includes(broker))
     || expectedBrokers.length !== brokerNames.length
     || new Set(expectedBrokers).size !== expectedBrokers.length
     || !expectedBrokers.every((broker) => allowedBrokers.includes(broker) && brokerNames.includes(broker))
-    || !["Futu", "Tiger"].every((broker) => brokerNames.includes(broker))
-    || rows.some((row) => row?.source_status !== "OK")) return null;
+    || !["Futu", "Tiger"].every((broker) => brokerNames.includes(broker))) return null;
   const futu = rows.find((row) => row?.broker === "Futu");
   const tiger = rows.find((row) => row?.broker === "Tiger");
-  if (!futu || !tiger) return null;
+  if (!futu || !tiger || futu.source_status !== "OK") return null;
   const manual = safeManualReturnReference(futu.manual_return_reference, "Futu");
   const calculated = safeCalculatedBrokerReturn(futu.calculated_return, "Futu");
   const native = safeNativeBrokerReturn(tiger?.native_return, "Tiger");
@@ -270,7 +269,7 @@ export function anchoredPortfolioReturnReference(summary) {
   const growth = (1 + manualReturn) * (1 + postAnchor);
   if (!Number.isFinite(growth) || growth <= 0) return null;
   const futuAnnualized = growth ** (365 / elapsed) - 1;
-  const tigerAnnualized = native?.coverage_status === "COMPLETE"
+  const tigerAnnualized = tiger.source_status === "OK" && native?.coverage_status === "COMPLETE"
     ? nativeFiniteNumber(native.annualized_total_return) : null;
   const annualizedByBroker = new Map([
     ["Futu", Number.isFinite(futuAnnualized) ? futuAnnualized : null],
@@ -280,9 +279,10 @@ export function anchoredPortfolioReturnReference(summary) {
   if (ibkr) {
     const ibkrNative = safeNativeBrokerReturn(ibkr.native_return, "IBKR");
     const ibkrCalculated = safeCalculatedBrokerReturn(ibkr.calculated_return, "IBKR");
-    const ibkrNativeAnnualized = ibkrNative?.coverage_status === "COMPLETE"
+    const ibkrNativeAnnualized = ibkr.source_status === "OK" && ibkrNative?.coverage_status === "COMPLETE"
       ? nativeFiniteNumber(ibkrNative.annualized_total_return) : null;
-    const ibkrAnnualized = ibkrNativeAnnualized ?? (ibkrCalculated?.coverage_status === "COMPLETE"
+    const ibkrAnnualized = ibkrNativeAnnualized ?? (ibkr.source_status === "OK"
+      && ibkrCalculated?.coverage_status === "COMPLETE"
       && ibkrCalculated.capital_flow_coverage_status === "COMPLETE"
       ? nativeFiniteNumber(ibkrCalculated.annualized_total_return) : null);
     annualizedByBroker.set("IBKR", ibkrAnnualized);
@@ -302,7 +302,9 @@ export function anchoredPortfolioReturnReference(summary) {
     const row = navRows.find((candidate) => candidate.broker === broker);
     return !row || row.annualized === null;
   });
-  const combined = exactThreeBrokerScope && totalNav > 0
+  const allSourcesCurrent = summary.source_status === "OK"
+    && rows.every((row) => row?.source_status === "OK");
+  const combined = allSourcesCurrent && exactThreeBrokerScope && totalNav > 0
     && missingReferenceBrokers.length === 0 && navIdentityValid
     ? navRows.reduce((sum, row) => sum + row.nav * row.annualized, 0) / totalNav : null;
   return {
@@ -1002,6 +1004,73 @@ function confirmedPortfolioOverviewCandidate(value) {
   ]));
   result.broker_breakdown = safeBreakdown;
   return result;
+}
+
+export function currentPortfolioReturnReferenceSummary(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const summaryStatus = String(value.source_status || "").toUpperCase();
+  if (summaryStatus === HEALTHY) return confirmedPortfolioOverviewCandidate(value);
+  if (summaryStatus !== "PARTIAL" || timestamp(value.source_retrieved_at) === null) return null;
+  const breakdown = Array.isArray(value.broker_breakdown) ? value.broker_breakdown : [];
+  const expectedBrokers = Array.isArray(value.expected_brokers) ? value.expected_brokers : [];
+  if (expectedBrokers.length !== breakdown.length
+    || new Set(expectedBrokers).size !== expectedBrokers.length
+    || !expectedBrokers.every((broker) => ALLOWED_LIVE_BROKERS.has(broker))) return null;
+  const seen = new Set();
+  const safeBreakdown = breakdown.map((row) => {
+    const broker = String(row?.broker || "");
+    const rowStatus = String(row?.source_status || "").toUpperCase();
+    if (!ALLOWED_LIVE_BROKERS.has(broker) || seen.has(broker)
+      || (rowStatus !== HEALTHY && !SOURCE_FAILURE_STATES.has(rowStatus))) return null;
+    seen.add(broker);
+    if (rowStatus !== HEALTHY) return {
+      broker,
+      source_status: rowStatus,
+      derived_nav_usd: null,
+      gross_market_value_usd: null,
+      gross_leverage: null,
+      source_retrieved_at: row?.source_retrieved_at ?? null,
+      manual_return_reference: safeManualReturnReference(null, broker),
+      native_return: null,
+      calculated_return: safeCalculatedBrokerReturn(null, broker),
+    };
+    const rowNav = nativeFiniteNumber(row?.derived_nav_usd);
+    const rowGross = nativeFiniteNumber(row?.gross_market_value_usd);
+    const rowLeverage = nativeFiniteNumber(row?.gross_leverage);
+    const native = safeNativeBrokerReturn(row?.native_return, broker);
+    const calculatedReturn = safeCalculatedBrokerReturn(row?.calculated_return, broker);
+    const manualReference = safeManualReturnReference(row?.manual_return_reference, broker);
+    if (rowNav === null || rowNav <= 0 || rowGross === null || rowGross < 0
+      || rowLeverage === null || rowLeverage < 0
+      || Math.abs(rowLeverage - rowGross / rowNav) >= 0.0001
+      || calculatedReturn === null || manualReference === undefined) return null;
+    return {
+      broker,
+      source_status: HEALTHY,
+      derived_nav_usd: rowNav,
+      gross_market_value_usd: rowGross,
+      gross_leverage: rowLeverage,
+      source_retrieved_at: row?.source_retrieved_at ?? null,
+      manual_return_reference: manualReference,
+      native_return: native,
+      calculated_return: calculatedReturn,
+    };
+  });
+  if (safeBreakdown.some((row) => row === null)
+    || safeBreakdown.some((row) => !expectedBrokers.includes(row.broker))
+    || !["Futu", "Tiger"].every((broker) => seen.has(broker))) return null;
+  return {
+    source_status: "PARTIAL",
+    derived_nav_usd: null,
+    gross_market_value_usd: null,
+    gross_leverage: null,
+    gross_leverage_red: nativeFiniteNumber(value.gross_leverage_red),
+    source_retrieved_at: value.source_retrieved_at,
+    holdings_as_of: value.holdings_as_of ?? null,
+    source_label: value.source_label ?? null,
+    expected_brokers: [...expectedBrokers],
+    broker_breakdown: safeBreakdown,
+  };
 }
 
 export function updateLastConfirmedPortfolioOverview(current, incoming) {
