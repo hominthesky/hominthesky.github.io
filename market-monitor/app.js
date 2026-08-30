@@ -503,6 +503,10 @@ const MANUAL_RETURN_REFERENCE_CONTRACT = Object.freeze({
   id: "manual_broker_return_reference_v1",
   formula: "broker_app_reported_cash_weighted_return_and_interval_profit",
 });
+const MANUAL_RETURN_REFERENCE_V2_CONTRACT = Object.freeze({
+  id: "manual_broker_return_reference_v2",
+  formula: "broker_app_reported_ytd_time_weighted_and_money_weighted_returns",
+});
 
 function overviewMetric(label, value, note, options = {}) {
   const item = el("div", "portfolio-overview-metric");
@@ -602,6 +606,15 @@ function renderPortfolioOverview() {
           if (row.broker === "Futu") {
             const details = [];
             const manual = row.manual_return_reference || {};
+            const governedManualV2 = manual.contract_id === MANUAL_RETURN_REFERENCE_V2_CONTRACT.id
+              && manual.formula === MANUAL_RETURN_REFERENCE_V2_CONTRACT.formula
+              && manual.broker === "Futu" && manual.scope === "US_EQUITIES"
+              && manual.method === "BROKER_APP_USER_CONFIRMED"
+              && manual.verification_status === "USER_CONFIRMED"
+              && manual.currency === "USD" && manual.auto_refresh === false
+              && isFiniteMetric(manual.time_weighted_return)
+              && isFiniteMetric(manual.money_weighted_return)
+              && Number.isInteger(manual.observation_count) && manual.observation_count >= 2;
             const governedManual = manual.contract_id === MANUAL_RETURN_REFERENCE_CONTRACT.id
               && manual.formula === MANUAL_RETURN_REFERENCE_CONTRACT.formula
               && manual.broker === "Futu" && manual.scope === "US_EQUITIES"
@@ -610,6 +623,11 @@ function renderPortfolioOverview() {
               && manual.currency === "USD" && manual.auto_refresh === false
               && isFiniteMetric(manual.cash_weighted_return)
               && isFiniteMetric(manual.interval_profit_usd);
+            if (governedManualV2) details.push({
+              label: "Futu · App TWR 锚定年化估算",
+              value: anchoredReference?.futu_annualized_estimate == null ? "—" : pct(anchoredReference.futu_annualized_estimate, 1),
+              note: `用户确认券商 App TWR ${pct(manual.time_weighted_return, 2)}、MWR ${pct(manual.money_weighted_return, 2)}（最新交易日 ${manual.anchor_effective_date || "—"}，锚点不会自动更新）· 连续核验 ${manual.observed_start_date || "—"}—${manual.observed_end_date || "—"}，共 ${manual.observation_count} 个交易日 · ${anchoredReference?.continuation_status === "CONTINUING" ? "后续系统日终已续算" : "等待锚点后的完整系统日终续算"} · 累计 ${anchoredReference ? pct(anchoredReference.futu_cumulative, 1) : "—"} · ${manual.start_date || "—"}—${anchoredReference?.end_date || liveTime(manual.as_of)} · 混合方法估算`,
+            });
             if (governedManual) details.push({
               label: "Futu · 锚定年化估算",
               value: anchoredReference?.futu_annualized_estimate == null ? "—" : pct(anchoredReference.futu_annualized_estimate, 1),

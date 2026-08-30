@@ -52,6 +52,7 @@ const PORTFOLIO_OVERVIEW_FIELDS = [
   "source_retrieved_at",
   "holdings_as_of",
   "source_label",
+  "expected_brokers",
   "broker_breakdown",
 ];
 const SOURCE_FAILURE_STATES = new Set([
@@ -69,11 +70,13 @@ const BROKER_CALCULATED_RETURN_REASONS = new Set([
   "RETURN_OUT_OF_DOMAIN", "ANNUALIZATION_INVALID", "MINIMUM_HISTORY_NOT_MET",
 ]);
 const MANUAL_RETURN_REFERENCE_FORMULA = "broker_app_reported_cash_weighted_return_and_interval_profit";
+const MANUAL_RETURN_REFERENCE_V2_FORMULA = "broker_app_reported_ytd_time_weighted_and_money_weighted_returns";
 const MANUAL_REFERENCE_START_DATE = "2026-01-01";
 const MANUAL_REFERENCE_ANCHOR_DATE = "2026-08-07";
 const MANUAL_REFERENCE_FIRST_POST_ANCHOR_SESSION = "2026-08-10";
 const MANUAL_REFERENCE_AS_OF = "2026-08-10T00:17:50-04:00";
 const ANCHORED_BROKER_RETURN_FORMULA = "(1+owner_confirmed_cash_weighted_return)*chain_link(post_anchor_modified_dietz_returns)-1; annualized_estimate=(1+anchored_cumulative)^(365/elapsed_calendar_days)-1";
+const ANCHORED_BROKER_RETURN_V2_FORMULA = "(1+owner_confirmed_time_weighted_return)*chain_link(post_anchor_modified_dietz_returns)-1; annualized_estimate=(1+anchored_cumulative)^(365/elapsed_calendar_days)-1";
 const PORTFOLIO_ANNUALIZED_REFERENCE_FORMULA = "sum(current_broker_nav/current_total_nav*broker_annualized_reference)";
 
 export function yearCoverageLabel(coverageStatus) {
@@ -212,11 +215,15 @@ export function resolveLiveCashflowDisplay(live) {
 export function anchoredPortfolioReturnReference(summary) {
   const rows = Array.isArray(summary?.broker_breakdown) ? summary.broker_breakdown : [];
   const allowedBrokers = ["Futu", "Tiger", "IBKR"];
+  const expectedBrokers = Array.isArray(summary?.expected_brokers) ? summary.expected_brokers : [];
   const brokerNames = rows.map((row) => row?.broker);
   if (summary?.source_status !== "OK"
     || rows.length < 2 || rows.length > allowedBrokers.length
     || new Set(brokerNames).size !== rows.length
     || !brokerNames.every((broker) => allowedBrokers.includes(broker))
+    || expectedBrokers.length !== brokerNames.length
+    || new Set(expectedBrokers).size !== expectedBrokers.length
+    || !expectedBrokers.every((broker) => allowedBrokers.includes(broker) && brokerNames.includes(broker))
     || !["Futu", "Tiger"].every((broker) => brokerNames.includes(broker))
     || rows.some((row) => row?.source_status !== "OK")) return null;
   const futu = rows.find((row) => row?.broker === "Futu");
@@ -226,12 +233,14 @@ export function anchoredPortfolioReturnReference(summary) {
   const calculated = safeCalculatedBrokerReturn(futu.calculated_return, "Futu");
   const native = safeNativeBrokerReturn(tiger?.native_return, "Tiger");
   if (!manual || manual.verification_status !== "USER_CONFIRMED" || !calculated) return null;
-  const manualReturn = nativeFiniteNumber(manual.cash_weighted_return);
+  const manualIsV2 = manual.contract_id === "manual_broker_return_reference_v2";
+  const manualReturn = nativeFiniteNumber(manualIsV2 ? manual.time_weighted_return : manual.cash_weighted_return);
   const anchor = manual.anchor_effective_date;
   const accumulationDatesAbsent = calculated.start_date === null && calculated.end_date === null;
   const accumulationSinglePoint = validManualDate(calculated.start_date)
     && calculated.start_date === calculated.end_date
-    && [anchor, MANUAL_REFERENCE_FIRST_POST_ANCHOR_SESSION].includes(calculated.start_date);
+    && (calculated.start_date === anchor
+      || (!manualIsV2 && calculated.start_date === MANUAL_REFERENCE_FIRST_POST_ANCHOR_SESSION));
   const noContinuationYet = calculated.coverage_status === "MISSING"
     && calculated.capital_flow_coverage_status === "UNKNOWN"
     && calculated.reason_codes?.length === 1
@@ -240,7 +249,7 @@ export function anchoredPortfolioReturnReference(summary) {
   const completeContinuation = calculated.coverage_status === "COMPLETE"
     && calculated.capital_flow_coverage_status === "COMPLETE"
     && calculated.start_date === anchor && calculated.end_date >= anchor;
-  const completeAfterGap = calculated.coverage_status === "COMPLETE"
+  const completeAfterGap = !manualIsV2 && calculated.coverage_status === "COMPLETE"
     && calculated.capital_flow_coverage_status === "COMPLETE"
     && validManualDate(calculated.start_date) && validManualDate(calculated.end_date)
     && calculated.start_date === MANUAL_REFERENCE_FIRST_POST_ANCHOR_SESSION
@@ -288,15 +297,20 @@ export function anchoredPortfolioReturnReference(summary) {
   const declaredTotalNav = nativeFiniteNumber(summary?.derived_nav_usd);
   const navIdentityValid = totalNav !== null && declaredTotalNav !== null
     && Math.abs(totalNav - declaredTotalNav) < 0.005;
-  const missingReferenceBrokers = navRows
-    .filter((row) => row.annualized === null)
-    .map((row) => row.broker);
-  const combined = totalNav > 0 && missingReferenceBrokers.length === 0 && navIdentityValid
+  const exactThreeBrokerScope = allowedBrokers.every((broker) => expectedBrokers.includes(broker));
+  const missingReferenceBrokers = allowedBrokers.filter((broker) => {
+    const row = navRows.find((candidate) => candidate.broker === broker);
+    return !row || row.annualized === null;
+  });
+  const combined = exactThreeBrokerScope && totalNav > 0
+    && missingReferenceBrokers.length === 0 && navIdentityValid
     ? navRows.reduce((sum, row) => sum + row.nav * row.annualized, 0) / totalNav : null;
   return {
-    anchored_contract_id: "anchored_broker_return_v1",
-    anchored_formula: ANCHORED_BROKER_RETURN_FORMULA,
-    anchored_method: "OWNER_CONFIRMED_MWR_ANCHOR_PLUS_MODIFIED_DIETZ",
+    anchored_contract_id: manualIsV2 ? "anchored_broker_return_v2" : "anchored_broker_return_v1",
+    anchored_formula: manualIsV2 ? ANCHORED_BROKER_RETURN_V2_FORMULA : ANCHORED_BROKER_RETURN_FORMULA,
+    anchored_method: manualIsV2
+      ? "OWNER_CONFIRMED_TWR_ANCHOR_PLUS_MODIFIED_DIETZ"
+      : "OWNER_CONFIRMED_MWR_ANCHOR_PLUS_MODIFIED_DIETZ",
     futu_cumulative: growth - 1,
     futu_annualized_estimate: Number.isFinite(futuAnnualized) ? futuAnnualized : null,
     portfolio_reference_contract_id: "portfolio_annualized_reference_v1",
@@ -704,7 +718,7 @@ export function applyLiveRiskGate(personal, incoming) {
   };
 }
 
-function safeCalculatedBrokerReturn(value, broker) {
+export function safeCalculatedBrokerReturn(value, broker) {
   if (value === null || value === undefined) return {
     contract_id: "broker_portfolio_return_v1",
     formula: BROKER_CALCULATED_RETURN_FORMULA,
@@ -780,17 +794,57 @@ function validManualTimestamp(value) {
   return zone?.replace("GMT", "") === value.slice(-6);
 }
 
-function safeManualReturnReference(value, broker) {
+export function safeManualReturnReference(value, broker) {
   if (broker !== "Futu") return value === null || value === undefined ? null : undefined;
   const missing = {
-    contract_id: "manual_broker_return_reference_v1", formula: MANUAL_RETURN_REFERENCE_FORMULA,
-    broker: "Futu", scope: "US_EQUITIES", method: "BROKER_APP_CASH_WEIGHTED",
+    contract_id: "manual_broker_return_reference_v2", formula: MANUAL_RETURN_REFERENCE_V2_FORMULA,
+    broker: "Futu", scope: "US_EQUITIES", method: "BROKER_APP_USER_CONFIRMED",
     verification_status: "MISSING", start_date: null, anchor_effective_date: null, as_of: null,
-    cash_weighted_return: null, interval_profit_usd: null, currency: "USD",
-    auto_refresh: false, reason_codes: ["HISTORY_EMPTY"],
+    time_weighted_return: null, money_weighted_return: null,
+    observed_start_date: null, observed_end_date: null, observation_count: 0,
+    currency: "USD", auto_refresh: false, reason_codes: ["HISTORY_EMPTY"],
   };
   if (value === null || value === undefined) return missing;
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const v2Valid = value.contract_id === "manual_broker_return_reference_v2"
+    && value.formula === MANUAL_RETURN_REFERENCE_V2_FORMULA && value.broker === "Futu"
+    && value.scope === "US_EQUITIES" && value.method === "BROKER_APP_USER_CONFIRMED"
+    && value.currency === "USD" && value.auto_refresh === false;
+  if (v2Valid && value.verification_status === "MISSING") {
+    return value.start_date === null && value.anchor_effective_date === null && value.as_of === null
+      && value.time_weighted_return === null && value.money_weighted_return === null
+      && value.observed_start_date === null && value.observed_end_date === null
+      && value.observation_count === 0 && Array.isArray(value.reason_codes)
+      && value.reason_codes.length === 1 && ["HISTORY_EMPTY", "INPUT_INVALID"].includes(value.reason_codes[0])
+      ? { ...missing, reason_codes: [value.reason_codes[0]] } : undefined;
+  }
+  if (v2Valid) {
+    const start = value.start_date;
+    const anchor = value.anchor_effective_date;
+    const observationStart = value.observed_start_date;
+    const observationEnd = value.observed_end_date;
+    const twr = nativeFiniteNumber(value.time_weighted_return);
+    const mwr = nativeFiniteNumber(value.money_weighted_return);
+    const observationSpanDays = validManualDate(observationStart) && validManualDate(observationEnd)
+      ? Math.floor((Date.parse(`${observationEnd}T00:00:00Z`) - Date.parse(`${observationStart}T00:00:00Z`)) / 86_400_000) + 1
+      : null;
+    if (value.verification_status !== "USER_CONFIRMED" || !validManualDate(start)
+      || !validManualDate(anchor) || !validManualDate(observationStart) || observationEnd !== anchor
+      || !validManualDate(observationEnd) || start !== `${value.as_of?.slice(0, 4)}-01-01`
+      || observationStart >= observationEnd || observationSpanDays === null
+      || !Number.isInteger(value.observation_count) || value.observation_count < 2
+      || value.observation_count > observationSpanDays
+      || !validManualTimestamp(value.as_of) || twr === null || twr <= -1 || mwr === null || mwr <= -1
+      || !Array.isArray(value.reason_codes) || value.reason_codes.length !== 0) return undefined;
+    return {
+      contract_id: value.contract_id, formula: value.formula, broker: "Futu", scope: "US_EQUITIES",
+      method: value.method, verification_status: "USER_CONFIRMED", start_date: start,
+      anchor_effective_date: anchor, as_of: value.as_of, time_weighted_return: twr,
+      money_weighted_return: mwr, observed_start_date: observationStart,
+      observed_end_date: observationEnd, observation_count: value.observation_count,
+      currency: "USD", auto_refresh: false, reason_codes: [],
+    };
+  }
   const commonValid = value.contract_id === "manual_broker_return_reference_v1"
     && value.formula === MANUAL_RETURN_REFERENCE_FORMULA && value.broker === "Futu"
     && value.scope === "US_EQUITIES" && value.method === "BROKER_APP_CASH_WEIGHTED"
@@ -897,6 +951,10 @@ function confirmedPortfolioOverviewCandidate(value) {
     return null;
   }
   const breakdown = Array.isArray(value.broker_breakdown) ? value.broker_breakdown : [];
+  const expectedBrokers = Array.isArray(value.expected_brokers) ? value.expected_brokers : [];
+  if (expectedBrokers.length !== breakdown.length
+    || new Set(expectedBrokers).size !== expectedBrokers.length
+    || !expectedBrokers.every((broker) => ["Futu", "Tiger", "IBKR"].includes(broker))) return null;
   const seen = new Set();
   const safeBreakdown = breakdown.map((row) => {
     const broker = String(row?.broker || "");
@@ -924,6 +982,7 @@ function confirmedPortfolioOverviewCandidate(value) {
     };
   });
   if (safeBreakdown.some((row) => row === null)) return null;
+  if (safeBreakdown.some((row) => !expectedBrokers.includes(row.broker))) return null;
   if (!["Futu", "Tiger"].every((broker) => seen.has(broker))) return null;
   if (safeBreakdown.length) {
     const breakdownNav = safeBreakdown.reduce((sum, row) => sum + row.derived_nav_usd, 0);
