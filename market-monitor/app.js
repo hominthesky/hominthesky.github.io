@@ -26,7 +26,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260831-1";
+} from "./live_trading.mjs?v=20260901-1";
 import {
   effectiveHoldingsStatus,
   filterHoldingRows,
@@ -593,7 +593,7 @@ function renderPortfolioOverview() {
       "跨券商总净资产",
       usd(summary.derived_nav_usd, true),
       isFiniteMetric(summary.derived_nav_usd)
-        ? `最近确认 · ${liveTime(summary.source_retrieved_at)}`
+        ? `${summary.confirmation_kind === "POSTCLOSE_HISTORY" ? "最近完整日终确认" : "最近确认"} · ${liveTime(summary.source_retrieved_at)}`
         : "尚无完整券商组合快照",
       {
         definition: TERM_DEFINITIONS.portfolioNav,
@@ -783,6 +783,10 @@ function mergeLivePayload(payload) {
   };
   const incomingRiskGate = payload?.personal?.risk_gate;
   if (incomingRiskGate && typeof incomingRiskGate === "object") {
+    portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
+      portfolioOverviewSummary,
+      incomingRiskGate.last_confirmed_overview,
+    );
     portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
       portfolioOverviewSummary,
       incomingRiskGate,
@@ -3766,6 +3770,10 @@ byId("unlock-form").addEventListener("submit", async (event) => {
     monitorData = unlocked.data;
     portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
       null,
+      monitorData.personal?.summary?.last_confirmed_overview,
+    );
+    portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
+      portfolioOverviewSummary,
       monitorData.personal?.summary,
     );
     portfolioReturnReferenceSummary = currentPortfolioReturnReferenceSummary(

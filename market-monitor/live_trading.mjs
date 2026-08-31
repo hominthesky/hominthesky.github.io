@@ -44,6 +44,7 @@ const RISK_SNAPSHOT_FIELDS = [
   "broker_coverage",
 ];
 const PORTFOLIO_OVERVIEW_FIELDS = [
+  "confirmation_kind",
   "source_status",
   "derived_nav_usd",
   "gross_market_value_usd",
@@ -939,6 +940,8 @@ function safeNativeBrokerReturn(value, broker) {
 
 function confirmedPortfolioOverviewCandidate(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (value.confirmation_kind != null
+    && value.confirmation_kind !== "POSTCLOSE_HISTORY") return null;
   if (String(value.source_status || "").toUpperCase() !== HEALTHY) return null;
   const nav = value.derived_nav_usd;
   const gross = value.gross_market_value_usd;
@@ -954,7 +957,8 @@ function confirmedPortfolioOverviewCandidate(value) {
   }
   const breakdown = Array.isArray(value.broker_breakdown) ? value.broker_breakdown : [];
   const expectedBrokers = Array.isArray(value.expected_brokers) ? value.expected_brokers : [];
-  if (expectedBrokers.length !== breakdown.length
+  if (expectedBrokers.length !== 3 || breakdown.length !== 3
+    || expectedBrokers.length !== breakdown.length
     || new Set(expectedBrokers).size !== expectedBrokers.length
     || !expectedBrokers.every((broker) => ["Futu", "Tiger", "IBKR"].includes(broker))) return null;
   const seen = new Set();
@@ -1077,6 +1081,10 @@ export function updateLastConfirmedPortfolioOverview(current, incoming) {
   const previous = confirmedPortfolioOverviewCandidate(current);
   const next = confirmedPortfolioOverviewCandidate(incoming);
   if (!next) return previous;
+  if (previous
+    && timestamp(next.source_retrieved_at) < timestamp(previous.source_retrieved_at)) {
+    return previous;
+  }
   const previousFutu = previous?.broker_breakdown?.find((row) => row.broker === "Futu");
   const nextFutu = next.broker_breakdown?.find((row) => row.broker === "Futu");
   if (previousFutu?.manual_return_reference?.verification_status === "USER_CONFIRMED"
