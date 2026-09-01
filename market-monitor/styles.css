@@ -3663,6 +3663,28 @@ footer {
   margin-left: 0;
 }
 
+/*
+ * Open sections share one optical content edge. Legacy card-era wrappers used
+ * 16px/22px side insets; once the section shell was removed those insets made
+ * headings, tables, charts, and card grids appear to belong to different
+ * columns. Surfaces own their internal padding, never their outer alignment.
+ */
+.section-card > :not(.section-head) {
+  margin-inline: 0;
+}
+
+.section-card > :is(
+  .action-list,
+  .position-list,
+  .broker-source-line,
+  .trading-period-list,
+  .trading-method,
+  .holdings-controls,
+  .holdings-result-count
+) {
+  padding-inline: 0;
+}
+
 @media (max-width: 1100px) {
   .portfolio-overview-metric {
     padding-right: 20px;
