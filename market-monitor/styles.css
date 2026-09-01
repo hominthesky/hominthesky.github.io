@@ -3615,6 +3615,7 @@ footer {
 /* Content height, not sibling height, determines comparison-card geometry. */
 .strategy-broker-grid {
   align-items: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-5);
   margin: var(--space-5) 0 0;
 }

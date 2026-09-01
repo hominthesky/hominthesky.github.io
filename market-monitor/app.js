@@ -3016,7 +3016,7 @@ function strategyTrendData(data) {
         color,
         values: labels.map((label) => rows.find((row) => row.broker === broker && row.period === label)?.return ?? null),
       })),
-      note: "Futu 为券商月度展示收益，不可链式复原年度 TWR/MWR；Tiger 为日级 RoR 链式月度走势。",
+      note: "Futu 为券商月度展示收益，不可链式复原年度 TWR/MWR；Tiger 为日级 RoR 链式月度走势；IBKR Flex 当前只提供 YTD 原生 TWR，没有月度序列，不补造折线。",
     };
   }
   const rows = Array.isArray(data.annual_returns) ? data.annual_returns : [];
@@ -3028,6 +3028,7 @@ function strategyTrendData(data) {
     ["Futu MWR", "Futu", "mwr", "#60a5fa"],
     ["Tiger TWR", "Tiger", "twr", "#d97706"],
     ["Tiger MWR", "Tiger", "mwr", "#fbbf24"],
+    ["IBKR TWR", "IBKR", "twr", "#0f766e"],
   ];
   const series = definitions.map(([label, broker, field, color]) => ({
     id: label,
@@ -3058,7 +3059,7 @@ function strategyTrendData(data) {
   const combinedNote = combined
     ? `跨券商系统值仅覆盖 ${combined.start_date}—${combined.end_date}${combined.coverage_status === "PARTIAL" ? "（部分年度）" : ""}；不平均券商百分比。`
     : "跨券商共同日终历史或资金流覆盖不足，系统 TWR/MWR 保持未知。";
-  return { labels, series, note: `年度券商值为原生核验；${combinedNote} SPY/QQQ 为价格回报，不含分红再投资。` };
+  return { labels, series, note: `年度券商值为原生核验；IBKR 仅有 Flex YTD TWR，MWR 与月度序列保持未知。${combinedNote} SPY/QQQ 为价格回报，不含分红再投资。` };
 }
 
 function selectedStrategySeries(trend) {
@@ -3552,9 +3553,12 @@ function renderStrategy() {
     return;
   }
   const annual = Array.isArray(data.annual_returns) ? data.annual_returns : [];
-  const latestYear = annual.length ? Math.max(...annual.map((row) => row.year)) : null;
-  const latestFutu = annual.find((row) => row.broker === "Futu" && row.year === latestYear);
-  const latestTiger = annual.find((row) => row.broker === "Tiger" && row.year === latestYear);
+  const latestBrokerReturn = (broker) => annual
+    .filter((row) => row.broker === broker)
+    .sort((left, right) => right.year - left.year)[0];
+  const latestFutu = latestBrokerReturn("Futu");
+  const latestTiger = latestBrokerReturn("Tiger");
+  const latestIbkr = latestBrokerReturn("IBKR");
   const combined = Array.isArray(data.portfolio_returns) ? data.portfolio_returns.at(-1) : null;
   const hero = el("section", "strategy-hero");
   append(hero,
@@ -3567,7 +3571,7 @@ function renderStrategy() {
     ["跨券商共同区间 TWR", combined ? pct(combined.twr) : "—", combined ? `MWR ${pct(combined.mwr)} · ${combined.start_date}—${combined.end_date}` : "共同日终历史或资金流覆盖不足"],
     ["Futu 最新 TWR", latestFutu ? pct(latestFutu.twr) : "—", latestFutu ? `MWR ${pct(latestFutu.mwr)} · ${latestFutu.coverage_status}` : "券商原生历史缺失"],
     ["Tiger 最新 TWR", latestTiger ? pct(latestTiger.twr) : "—", latestTiger ? `MWR ${pct(latestTiger.mwr)} · ${latestTiger.coverage_status}` : "券商原生历史缺失"],
-    ["策略配置覆盖", data.allocation?.status || "MISSING", `${data.allocation?.classified_position_count ?? 0} 已分类 · ${data.allocation?.unclassified_position_count ?? 0} 未分类`],
+    ["IBKR 最新 TWR", latestIbkr ? pct(latestIbkr.twr) : "—", latestIbkr ? `Flex 原生 · MWR 不可用 · ${latestIbkr.end_date}` : "Flex 原生收益缺失"],
   ];
   summaryRows.forEach(([label, value, note]) => {
     const card = el("article", "strategy-summary-card");
@@ -3578,12 +3582,12 @@ function renderStrategy() {
   const trend = section("跨券商收益与成长趋势", "年度看券商原生 TWR/MWR；月度只展示有证据支持的走势口径，缺失不补零。 ");
   trend.appendChild(renderStrategyTrend(data)); root.appendChild(trend);
 
-  const brokerSection = section("逐券商策略复盘", "Futu 与 Tiger 独立解读，适合比较不同券商中试验的策略方向。 ");
+  const brokerSection = section("逐券商策略复盘", "Futu、Tiger 与 IBKR 独立列示；IBKR 当前只有原生 TWR，不把缺失的 MWR 或盈亏补成零。 ");
   const brokerGrid = el("div", "strategy-broker-grid");
   const brokerNotes = [];
   const currentBrokers = Array.isArray(portfolioOverviewSummary?.broker_breakdown)
     ? portfolioOverviewSummary.broker_breakdown : [];
-  for (const broker of ["Futu", "Tiger"]) {
+  for (const broker of ["Futu", "Tiger", "IBKR"]) {
     const rows = annual.filter((row) => row.broker === broker).sort((a, b) => b.year - a.year)
       .map((row) => ({ ...row, pnl_display: strategyOriginalPnl(row) }));
     const current = currentBrokers.find((row) => row?.broker === broker);
@@ -3626,7 +3630,7 @@ function renderStrategy() {
 
   const recommendations = section("政策偏离与复盘建议", "由 strategy_policy_v1 的固定阈值和文案模板生成，不依赖大模型，也不会自动下单。 ");
   const insightList = el("div", "strategy-insight-list");
-  (data.insights || []).filter((item) => !["Futu", "Tiger"].includes(item.scope)).forEach((item) => {
+  (data.insights || []).filter((item) => !["Futu", "Tiger", "IBKR"].includes(item.scope)).forEach((item) => {
     const card = el("article", `strategy-insight ${item.severity.toLowerCase()}`);
     append(card, el("span", "badge", item.severity), el("h3", "", item.headline), el("p", "", item.body), el("code", "", item.rule_id));
     insightList.appendChild(card);
@@ -3641,6 +3645,7 @@ function renderStrategy() {
     ["券商原生年度", "逐券商历史比较的主事实；2020 Futu 和当年 YTD 明确为部分年度。"],
     ["Futu 月度展示", "截图月格不可链式复原年度 TWR/MWR，因此只做走势参考。"],
     ["Tiger 日级走势", "从 2024-11-27 的真实非零起点计算；App 年度值仍独立保留。"],
+    ["IBKR 原生 TWR", "Flex Change in NAV 只提供 YTD 原生 TWR；当前没有受治理 MWR、年度盈亏或月度序列。"],
     ["SPY / QQQ", "当前为正常交易时段价格回报，不含分红再投资，不能称为总回报。"],
   ].forEach(([label, body]) => {
     const item = el("article", "strategy-quality-item"); append(item, el("strong", "", label), el("p", "", body)); list.appendChild(item);
