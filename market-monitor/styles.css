@@ -2989,6 +2989,14 @@ input {
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-lg: 20px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
 }
 
 [data-theme="light"] {
@@ -3204,7 +3212,7 @@ select {
 
 .app-main {
   margin-left: 236px;
-  padding: 44px clamp(28px, 4.5vw, 72px) 56px;
+  padding: var(--space-7) clamp(var(--space-6), 4vw, var(--space-8)) var(--space-8);
 }
 
 .app-main > * {
@@ -3328,7 +3336,7 @@ select {
 }
 
 .section-card {
-  margin: 0 0 54px;
+  margin: 0 0 var(--space-7);
   overflow: visible;
   border: 0;
   border-radius: 0;
@@ -3337,7 +3345,7 @@ select {
 }
 
 .section-head {
-  padding: 0 0 18px;
+  padding: 0 0 var(--space-4);
   border-bottom: 1px solid var(--line);
 }
 
@@ -3603,6 +3611,57 @@ footer {
   line-height: 1.6;
 }
 
+/* Content height, not sibling height, determines comparison-card geometry. */
+.strategy-broker-grid {
+  align-items: start;
+  gap: var(--space-5);
+  margin: var(--space-5) 0 0;
+}
+
+.strategy-broker-card {
+  align-self: start;
+  background: var(--card);
+}
+
+.strategy-broker-head {
+  min-height: 64px;
+  padding: var(--space-4) var(--space-5);
+}
+
+.strategy-broker-card th,
+.strategy-broker-card td {
+  min-height: 44px;
+  padding: var(--space-3) var(--space-4);
+}
+
+.strategy-broker-note {
+  max-width: 76ch;
+  margin-top: var(--space-4);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.strategy-broker-note p {
+  margin: 0;
+}
+
+.strategy-broker-note p + p {
+  margin-top: var(--space-2);
+}
+
+.strategy-allocation,
+.strategy-instrument-types {
+  margin-right: 0;
+  margin-left: 0;
+}
+
+.strategy-insight-list,
+.strategy-quality-grid {
+  margin-right: 0;
+  margin-left: 0;
+}
+
 @media (max-width: 1100px) {
   .portfolio-overview-metric {
     padding-right: 20px;
@@ -3698,7 +3757,7 @@ footer {
   }
 
   .section-card {
-    margin-bottom: 44px;
+    margin-bottom: var(--space-6);
   }
 
   .risk-banner {
@@ -3730,6 +3789,10 @@ footer {
   .strategy-trend-controls {
     justify-content: flex-start;
     margin: 14px 0 18px;
+  }
+
+  .strategy-broker-grid {
+    gap: var(--space-4);
   }
 }
 

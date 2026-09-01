@@ -3580,6 +3580,7 @@ function renderStrategy() {
 
   const brokerSection = section("逐券商策略复盘", "Futu 与 Tiger 独立解读，适合比较不同券商中试验的策略方向。 ");
   const brokerGrid = el("div", "strategy-broker-grid");
+  const brokerNotes = [];
   const currentBrokers = Array.isArray(portfolioOverviewSummary?.broker_breakdown)
     ? portfolioOverviewSummary.broker_breakdown : [];
   for (const broker of ["Futu", "Tiger"]) {
@@ -3600,10 +3601,22 @@ function renderStrategy() {
       { key: "pnl_display", label: "券商年度盈亏", numeric: true },
       { key: "coverage_status", label: "覆盖" },
     ], rows));
-    (data.insights || []).filter((item) => item.scope === broker).forEach((item) => card.appendChild(el("p", "strategy-rule-note", item.body)));
+    (data.insights || []).filter((item) => item.scope === broker).forEach((item) => {
+      if (item.body) brokerNotes.push({ broker, body: item.body });
+    });
     brokerGrid.appendChild(card);
   }
-  brokerSection.appendChild(brokerGrid); root.appendChild(brokerSection);
+  brokerSection.appendChild(brokerGrid);
+  const uniqueBrokerNotes = [...new Map(brokerNotes.map((item) => [item.body, item])).values()];
+  if (uniqueBrokerNotes.length) {
+    const note = el("div", "strategy-broker-note");
+    uniqueBrokerNotes.forEach((item) => {
+      const body = uniqueBrokerNotes.length > 1 ? `${item.broker}：${item.body}` : item.body;
+      note.appendChild(el("p", "", body));
+    });
+    brokerSection.appendChild(note);
+  }
+  root.appendChild(brokerSection);
 
   const allocation = section("当前策略结构", "三桶比例以已分类长期多头战略持仓市值为分母；现金、空头、期权和未知分类单列。 ");
   allocation.appendChild(renderStrategyAllocation(data)); root.appendChild(allocation);
