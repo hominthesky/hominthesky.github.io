@@ -2959,3 +2959,821 @@ input {
   .header-actions { width: auto; }
   .metric-card { min-height: auto; }
 }
+
+/* 2026 precision interface: one view, one decision task. */
+:root,
+[data-theme="dark"] {
+  --bg: #0b0b0c;
+  --surface: #111113;
+  --surface-2: #18181b;
+  --surface-3: #222226;
+  --card: #131315;
+  --row: #111113;
+  --row-hover: #19191c;
+  --input: #0f0f11;
+  --line: rgba(255, 255, 255, 0.1);
+  --line-strong: rgba(255, 255, 255, 0.2);
+  --text: #f5f5f7;
+  --text-secondary: #d2d2d7;
+  --muted: #98989f;
+  --ink: var(--text);
+  --cyan: #2997ff;
+  --cyan-soft: rgba(41, 151, 255, 0.14);
+  --green: #30d158;
+  --green-soft: rgba(48, 209, 88, 0.12);
+  --amber: #ffd60a;
+  --amber-soft: rgba(255, 214, 10, 0.12);
+  --red: #ff453a;
+  --red-soft: rgba(255, 69, 58, 0.12);
+  --shadow: 0 18px 60px rgba(0, 0, 0, 0.26);
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+}
+
+[data-theme="light"] {
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --surface-2: #f5f5f7;
+  --surface-3: #e8e8ed;
+  --card: #ffffff;
+  --row: #ffffff;
+  --row-hover: #f5f5f7;
+  --input: #ffffff;
+  --line: rgba(0, 0, 0, 0.09);
+  --line-strong: rgba(0, 0, 0, 0.18);
+  --text: #1d1d1f;
+  --text-secondary: #424245;
+  --muted: #6e6e73;
+  --ink: var(--text);
+  --cyan: #0066cc;
+  --cyan-soft: rgba(0, 102, 204, 0.09);
+  --green: #147d43;
+  --green-soft: rgba(20, 125, 67, 0.09);
+  --amber: #946200;
+  --amber-soft: rgba(148, 98, 0, 0.09);
+  --red: #c9342f;
+  --red-soft: rgba(201, 52, 47, 0.09);
+  --shadow: 0 18px 45px rgba(0, 0, 0, 0.08);
+}
+
+html {
+  background: var(--bg);
+  font-size: 16px;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: var(--bg);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button,
+summary,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--cyan);
+  outline-offset: 3px;
+}
+
+.icon-button {
+  width: 44px;
+  height: 44px;
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+select {
+  min-height: 44px;
+}
+
+.unlock-view {
+  padding: 32px;
+  background: var(--bg);
+}
+
+.unlock-card {
+  width: min(100%, 520px);
+  padding: clamp(30px, 5vw, 48px);
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  box-shadow: var(--shadow);
+}
+
+.unlock-card h1 {
+  max-width: 11em;
+  margin: 18px 0 14px;
+  font-size: clamp(32px, 6vw, 48px);
+  line-height: 1.04;
+  letter-spacing: -0.045em;
+}
+
+.unlock-copy {
+  max-width: 34em;
+  margin-bottom: 34px;
+  font-size: 15px;
+}
+
+.password-row {
+  gap: 12px;
+}
+
+.password-row input,
+#unlock-button {
+  min-height: 52px;
+  border-radius: 13px;
+}
+
+#unlock-button {
+  background: var(--cyan);
+  box-shadow: none;
+}
+
+.app-drawer {
+  width: 236px;
+  padding: 20px 14px 16px;
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: none;
+}
+
+.drawer-topline {
+  min-height: 48px;
+  margin-bottom: 26px;
+}
+
+.drawer-brand {
+  gap: 11px;
+}
+
+.brand-mark.compact {
+  flex-basis: 36px;
+  width: 36px;
+  height: 36px;
+}
+
+.drawer-brand-copy {
+  gap: 1px;
+}
+
+.drawer-brand-copy strong {
+  font-size: 14px;
+  letter-spacing: -0.015em;
+}
+
+.drawer-brand-copy span {
+  font-size: 11px;
+}
+
+.drawer-group-label {
+  margin: 24px 12px 8px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.drawer-item,
+.drawer-utility {
+  min-height: 44px;
+  gap: 10px;
+  padding: 0 12px;
+  border-radius: 11px;
+}
+
+.drawer-item[aria-current="page"] {
+  color: var(--text);
+  background: var(--surface-3);
+  box-shadow: none;
+}
+
+.drawer-item[aria-current="page"]::before {
+  position: absolute;
+  left: 4px;
+  width: 3px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--cyan);
+  content: "";
+}
+
+.drawer-item {
+  position: relative;
+}
+
+.drawer-icon {
+  font-size: 14px;
+  opacity: 0.82;
+}
+
+.drawer-label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.currency-control {
+  min-height: 52px;
+  padding: 4px;
+  border: 0;
+  background: var(--surface-2);
+}
+
+.currency-option {
+  min-height: 44px;
+  font-size: 12px;
+}
+
+.drawer-footer {
+  gap: 5px;
+  padding-top: 14px;
+}
+
+.app-main {
+  margin-left: 236px;
+  padding: 44px clamp(28px, 4.5vw, 72px) 56px;
+}
+
+.app-main > * {
+  width: min(100%, 1280px);
+}
+
+.dashboard.drawer-collapsed .app-drawer {
+  width: 72px;
+}
+
+.dashboard.drawer-collapsed .app-main {
+  margin-left: 72px;
+}
+
+.dashboard-header {
+  min-height: 84px;
+  padding: 0;
+}
+
+.dashboard-header .eyebrow {
+  display: none;
+}
+
+.dashboard-header h1 {
+  margin: 0 0 8px;
+  font-size: clamp(34px, 4vw, 48px);
+  font-weight: 720;
+  line-height: 1.03;
+  letter-spacing: -0.045em;
+}
+
+.page-subtitle {
+  max-width: 52em;
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.asof-line {
+  gap: 7px 18px;
+  margin: 18px 0 34px;
+  padding: 15px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.status-pill,
+.badge,
+.readiness,
+.action-label {
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-pill::before {
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.portfolio-overview {
+  margin: 0 0 48px;
+  overflow: visible;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.portfolio-overview-head {
+  min-height: 54px;
+  padding: 17px 0 14px;
+}
+
+.portfolio-overview-head strong {
+  font-size: 15px;
+}
+
+.portfolio-overview-head span {
+  font-size: 12px;
+}
+
+.portfolio-overview-metric {
+  gap: 8px;
+  min-height: 154px;
+  padding: 24px 28px 26px;
+}
+
+.portfolio-overview-metric:first-child {
+  padding-left: 0;
+}
+
+.portfolio-overview-metric:last-child {
+  padding-right: 0;
+}
+
+.portfolio-overview-label,
+.portfolio-overview-note {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.portfolio-overview-value {
+  font-size: clamp(30px, 3.5vw, 46px);
+  font-weight: 720;
+  letter-spacing: -0.045em;
+}
+
+.portfolio-overview-detail {
+  grid-template-columns: 52px minmax(82px, auto) minmax(0, 1fr);
+  font-size: 12px;
+}
+
+.section-card {
+  margin: 0 0 54px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.section-head {
+  padding: 0 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.section-head h2 {
+  margin: 0 0 6px;
+  font-size: clamp(22px, 2.3vw, 28px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.section-copy {
+  max-width: 70em;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.metric-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 54px;
+}
+
+.metric-card,
+.universe-card,
+.action-card,
+.trading-period,
+.strategy-broker-card,
+.strategy-bucket-card,
+.strategy-insight,
+.holdings-broker-card,
+.holdings-allocation-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  box-shadow: none;
+}
+
+.metric-card {
+  min-height: 208px;
+  padding: 24px;
+}
+
+.metric-card:hover,
+.universe-card:hover,
+.action-card:hover,
+.trading-breakdown-row:hover {
+  transform: none;
+  border-color: var(--line-strong);
+}
+
+.metric-label,
+.metric-note,
+.trading-stat .k,
+.strategy-broker-head span,
+.holdings-filter-field,
+.holdings-search-field {
+  font-size: 12px;
+}
+
+.metric-value {
+  margin: 14px 0 8px;
+  font-size: clamp(30px, 3.8vw, 44px);
+  font-weight: 720;
+  letter-spacing: -0.045em;
+}
+
+.metric-guidance {
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 16px;
+}
+
+.metric-guidance-row {
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.metric-guidance-label,
+.metric-guidance-row p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.risk-banner {
+  gap: 16px;
+  margin-bottom: 28px;
+  padding: 22px 24px;
+  border: 1px solid color-mix(in srgb, var(--red) 22%, var(--line));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--red-soft) 72%, var(--card));
+  box-shadow: none;
+}
+
+.risk-banner.amber {
+  border-color: color-mix(in srgb, var(--amber) 24%, var(--line));
+  background: color-mix(in srgb, var(--amber-soft) 72%, var(--card));
+}
+
+.risk-banner h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.risk-banner p {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.universe-grid {
+  gap: 14px;
+  margin-bottom: 54px;
+}
+
+.universe-card {
+  padding: 24px;
+}
+
+.action-list,
+.strategy-insight-list {
+  gap: 12px;
+  padding-top: 20px;
+}
+
+.action-card {
+  padding: 20px;
+}
+
+.table-wrap,
+.holdings-table-host {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+table {
+  font-size: 13px;
+}
+
+th {
+  color: var(--muted);
+  background: var(--surface-2);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+th,
+td {
+  min-height: 44px;
+  padding: 13px 15px;
+}
+
+tbody tr:hover td {
+  background: var(--row-hover);
+}
+
+.chart-wrap,
+.trading-chart-wrap {
+  margin: 20px 0 0;
+  padding: 22px 0 0;
+}
+
+.chart-legend,
+.trading-chart-legend,
+.strategy-legend {
+  gap: 10px 22px;
+  font-size: 13px;
+}
+
+.trading-chart-summary,
+.holdings-summary-grid,
+.strategy-summary-grid {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.trading-chart-summary-period,
+.trading-chart-summary-item,
+.holdings-summary-card,
+.strategy-summary-card {
+  min-height: 112px;
+  padding: 22px 24px;
+}
+
+.trading-chart-summary span,
+.section-note {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.trading-chart-summary strong,
+.holdings-summary-value,
+.strategy-summary-value {
+  font-size: clamp(24px, 3vw, 34px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.trading-settlement-status {
+  margin: 0 0 16px;
+  font-size: 12px;
+}
+
+.strategy-hero,
+.holdings-hero {
+  margin-bottom: 18px;
+  padding: 18px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.holdings-controls {
+  gap: 12px;
+  padding: 20px 0 16px;
+}
+
+.holdings-filter-select,
+.holdings-search-input,
+.strategy-cadence,
+.strategy-series-toggle,
+.chart-cadence-button,
+.live-refresh-button,
+.ghost-button {
+  min-height: 40px;
+  border-radius: var(--radius-sm);
+}
+
+.holdings-table-host {
+  margin: 0 0 24px;
+}
+
+.holdings-result-count {
+  padding: 0 0 12px;
+}
+
+.holdings-quality {
+  margin: 20px 0 0;
+  border-radius: var(--radius-md);
+}
+
+.strategy-trend-controls {
+  margin-top: -50px;
+}
+
+.strategy-series-toggle[aria-pressed="true"],
+.strategy-cadence[aria-pressed="true"],
+.chart-cadence-button[aria-pressed="true"] {
+  color: #fff;
+  border-color: var(--cyan);
+  background: var(--cyan);
+}
+
+footer {
+  margin-top: 72px;
+  padding: 24px 0 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (max-width: 1100px) {
+  .portfolio-overview-metric {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .app-drawer,
+  .dashboard.drawer-collapsed .app-drawer {
+    width: min(304px, calc(100vw - 40px));
+    padding: 20px 16px;
+  }
+
+  .app-main,
+  .dashboard.drawer-collapsed .app-main {
+    margin-left: 0;
+    padding: 28px clamp(18px, 5vw, 36px) 44px;
+  }
+
+  .dashboard-header h1 {
+    font-size: clamp(32px, 8vw, 42px);
+  }
+}
+
+@media (max-width: 720px) {
+  .unlock-view {
+    align-items: flex-start;
+    padding: 18px;
+  }
+
+  .unlock-card {
+    margin-top: 6vh;
+    padding: 28px 22px;
+    border-radius: 22px;
+  }
+
+  .password-row {
+    display: grid;
+  }
+
+  #unlock-button {
+    width: 100%;
+  }
+
+  .dashboard-header {
+    align-items: flex-start;
+    min-height: 76px;
+  }
+
+  .header-actions {
+    padding-top: 4px;
+  }
+
+  .asof-line {
+    margin-bottom: 28px;
+  }
+
+  .portfolio-overview {
+    margin-bottom: 40px;
+  }
+
+  .portfolio-overview-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .portfolio-overview-metric,
+  .portfolio-overview-metric:first-child,
+  .portfolio-overview-metric:last-child {
+    grid-column: 1 / -1;
+    min-height: 0;
+    padding: 22px 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .metric-grid,
+  .universe-grid,
+  .strategy-broker-grid,
+  .strategy-bucket-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-card {
+    min-height: 0;
+    padding: 22px;
+  }
+
+  .section-card {
+    margin-bottom: 44px;
+  }
+
+  .risk-banner {
+    padding: 18px;
+  }
+
+  .trading-chart-summary,
+  .holdings-summary-grid,
+  .strategy-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .trading-chart-summary-period,
+  .trading-chart-summary-item,
+  .holdings-summary-card,
+  .strategy-summary-card {
+    min-height: 104px;
+    padding: 18px;
+  }
+
+  .holdings-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .holdings-search-field {
+    grid-column: 1 / -1;
+  }
+
+  .strategy-trend-controls {
+    justify-content: flex-start;
+    margin: 14px 0 18px;
+  }
+}
+
+@media (max-width: 460px) {
+  .app-main,
+  .dashboard.drawer-collapsed .app-main {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .dashboard-header {
+    gap: 12px;
+  }
+
+  .dashboard-header h1 {
+    font-size: 30px;
+  }
+
+  .page-subtitle {
+    font-size: 14px;
+  }
+
+  .status-pill {
+    max-width: 112px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .trading-chart-summary,
+  .holdings-summary-grid,
+  .strategy-summary-grid,
+  .holdings-controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

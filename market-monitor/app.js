@@ -3487,7 +3487,6 @@ function renderHoldings() {
   });
   if (!brokerGrid.childElementCount) brokerGrid.appendChild(el("p", "empty-state", "分券商快照暂不可用。"));
   brokers.appendChild(brokerGrid);
-  root.appendChild(brokers);
 
   const ledger = section("跨券商持仓明细", "默认按策略合并行；目标、实际和漂移始终使用全组合三桶口径。筛选和分组只改变展示，不会重算金额或策略归属。");
   const controls = el("div", "holdings-controls");
@@ -3525,6 +3524,7 @@ function renderHoldings() {
   const allocation = section("三桶配置参照", "只复用组合策略页已经确认的已分类长期多头分母；空头、期权和未分类项不进入目标比例。");
   allocation.appendChild(renderHoldingsAllocation({ allocation: data.allocation }));
   root.appendChild(allocation);
+  root.appendChild(brokers);
 
   const quality = section("数据健康与边界", "展开查看当前账本为什么可能不完整。");
   const details = el("details", "holdings-quality");
@@ -3646,6 +3646,9 @@ function switchView(view) {
   if (!VIEW_META[view]) view = "personal";
   activeView = view;
   localStorage.setItem("zzao-monitor-view", view);
+  const dashboard = byId("dashboard");
+  dashboard.dataset.activeView = view;
+  byId("portfolio-overview").hidden = view !== "personal";
   Object.keys(VIEW_META).forEach((key) => {
     byId(`panel-${key}`).hidden = key !== view;
     byId(`nav-${key}`).setAttribute("aria-current", key === view ? "page" : "false");
@@ -3657,7 +3660,12 @@ function switchView(view) {
   const chartTooltip = byId("trading-chart-tooltip");
   if (chartTooltip) chartTooltip.hidden = true;
   setDrawerOpen(false);
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({
+    top: 0,
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "auto"
+      : "smooth",
+  });
   if (view === "holdings" && unlockKey && holdingsRuntime.state !== "loading") {
     void loadPrivateHoldings();
   }
