@@ -2302,12 +2302,16 @@ function liveSourceRows(live) {
     append(
       row,
       el("strong", "", source.broker || source.source || "未知来源"),
-      el("span", "", sourceStatus),
+      el("span", "", liveSourceStatusLabel(sourceStatus)),
       el("small", "", source.notes || "只读成交与可取得费用"),
     );
     list.appendChild(row);
   });
   return list;
+}
+
+function liveSourceStatusLabel(sourceStatus) {
+  return sourceStatus === "EXPECTED_LAG" ? "日结待更新" : sourceStatus;
 }
 
 function liveBrokerIndicator(source) {
@@ -2317,12 +2321,13 @@ function liveBrokerIndicator(source) {
     ? "ok"
     : sourceStatus === "FAILED"
       ? "failed"
-      : sourceStatus === "PARTIAL" || sourceStatus === "STALE"
+      : sourceStatus === "PARTIAL" || sourceStatus === "STALE" || sourceStatus === "EXPECTED_LAG"
         ? "warning"
         : "missing";
+  const statusLabel = liveSourceStatusLabel(sourceStatus);
   const indicator = el("span", `live-broker-indicator ${tone}`);
-  indicator.setAttribute("aria-label", `${broker} ${sourceStatus}`);
-  indicator.title = `${broker} · ${sourceStatus}`;
+  indicator.setAttribute("aria-label", `${broker} ${statusLabel}`);
+  indicator.title = `${broker} · ${statusLabel}`;
   append(
     indicator,
     el("span", "live-broker-dot", ""),
