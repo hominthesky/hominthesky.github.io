@@ -78,7 +78,7 @@ const MANUAL_REFERENCE_FIRST_POST_ANCHOR_SESSION = "2026-08-10";
 const MANUAL_REFERENCE_AS_OF = "2026-08-10T00:17:50-04:00";
 const ANCHORED_BROKER_RETURN_FORMULA = "(1+owner_confirmed_cash_weighted_return)*chain_link(post_anchor_modified_dietz_returns)-1; annualized_estimate=(1+anchored_cumulative)^(365/elapsed_calendar_days)-1";
 const ANCHORED_BROKER_RETURN_V2_FORMULA = "(1+owner_confirmed_time_weighted_return)*chain_link(post_anchor_modified_dietz_returns)-1; annualized_estimate=(1+anchored_cumulative)^(365/elapsed_calendar_days)-1";
-const PORTFOLIO_ANNUALIZED_REFERENCE_FORMULA = "sum(current_broker_nav/current_total_nav*broker_annualized_reference)";
+const PORTFOLIO_ANNUALIZED_REFERENCE_FORMULA = "sum(last_confirmed_postclose_broker_nav/last_confirmed_postclose_total_nav*broker_annualized_reference)";
 
 export function yearCoverageLabel(coverageStatus) {
   const status = String(coverageStatus || "UNKNOWN").toUpperCase();
@@ -213,7 +213,7 @@ export function resolveLiveCashflowDisplay(live) {
   return { value: null, generated: null, interest: null, complete: false, includesInterest: false };
 }
 
-export function anchoredPortfolioReturnReference(summary) {
+export function anchoredPortfolioReturnReference(summary, navWeightSummary = summary) {
   const rows = Array.isArray(summary?.broker_breakdown) ? summary.broker_breakdown : [];
   const allowedBrokers = ["Futu", "Tiger", "IBKR"];
   const expectedBrokers = Array.isArray(summary?.expected_brokers) ? summary.expected_brokers : [];
@@ -270,7 +270,7 @@ export function anchoredPortfolioReturnReference(summary) {
   const growth = (1 + manualReturn) * (1 + postAnchor);
   if (!Number.isFinite(growth) || growth <= 0) return null;
   const futuAnnualized = growth ** (365 / elapsed) - 1;
-  const tigerAnnualized = tiger.source_status === "OK" && native?.coverage_status === "COMPLETE"
+  const tigerAnnualized = native?.coverage_status === "COMPLETE"
     ? nativeFiniteNumber(native.annualized_total_return) : null;
   const annualizedByBroker = new Map([
     ["Futu", Number.isFinite(futuAnnualized) ? futuAnnualized : null],
@@ -280,34 +280,46 @@ export function anchoredPortfolioReturnReference(summary) {
   if (ibkr) {
     const ibkrNative = safeNativeBrokerReturn(ibkr.native_return, "IBKR");
     const ibkrCalculated = safeCalculatedBrokerReturn(ibkr.calculated_return, "IBKR");
-    const ibkrNativeAnnualized = ibkr.source_status === "OK" && ibkrNative?.coverage_status === "COMPLETE"
+    const ibkrNativeAnnualized = ibkrNative?.coverage_status === "COMPLETE"
       ? nativeFiniteNumber(ibkrNative.annualized_total_return) : null;
-    const ibkrAnnualized = ibkrNativeAnnualized ?? (ibkr.source_status === "OK"
-      && ibkrCalculated?.coverage_status === "COMPLETE"
+    const ibkrAnnualized = ibkrNativeAnnualized ?? (ibkrCalculated?.coverage_status === "COMPLETE"
       && ibkrCalculated.capital_flow_coverage_status === "COMPLETE"
       ? nativeFiniteNumber(ibkrCalculated.annualized_total_return) : null);
     annualizedByBroker.set("IBKR", ibkrAnnualized);
   }
-  const navRows = rows.map((row) => ({
+  const confirmedWeights = confirmedPortfolioOverviewCandidate(navWeightSummary);
+  const weightRows = confirmedWeights?.confirmation_kind === "POSTCLOSE_HISTORY"
+    && validManualDate(confirmedWeights?.holdings_as_of)
+    ? confirmedWeights.broker_breakdown : [];
+  const navRows = weightRows.map((row) => ({
     broker: row.broker,
     nav: nativeFiniteNumber(row.derived_nav_usd),
     annualized: annualizedByBroker.get(row.broker) ?? null,
   }));
-  const totalNav = navRows.every((row) => row.nav !== null && row.nav > 0)
+  const totalNav = navRows.length === allowedBrokers.length
+    && navRows.every((row) => row.nav !== null && row.nav > 0)
     ? navRows.reduce((sum, row) => sum + row.nav, 0) : null;
-  const declaredTotalNav = nativeFiniteNumber(summary?.derived_nav_usd);
+  const declaredTotalNav = nativeFiniteNumber(confirmedWeights?.derived_nav_usd);
   const navIdentityValid = totalNav !== null && declaredTotalNav !== null
-    && Math.abs(totalNav - declaredTotalNav) < 0.005;
+    && Math.abs(totalNav - declaredTotalNav) < 0.005
+    && confirmedWeights.expected_brokers.length === expectedBrokers.length
+    && expectedBrokers.every((broker) => confirmedWeights.expected_brokers.includes(broker));
   const exactThreeBrokerScope = allowedBrokers.every((broker) => expectedBrokers.includes(broker));
   const missingReferenceBrokers = allowedBrokers.filter((broker) => {
-    const row = navRows.find((candidate) => candidate.broker === broker);
-    return !row || row.annualized === null;
+    const row = rows.find((candidate) => candidate.broker === broker);
+    return !row || annualizedByBroker.get(broker) == null;
   });
-  const allSourcesCurrent = summary.source_status === "OK"
-    && rows.every((row) => row?.source_status === "OK");
-  const combined = allSourcesCurrent && exactThreeBrokerScope && totalNav > 0
+  const combined = exactThreeBrokerScope && totalNav > 0
     && missingReferenceBrokers.length === 0 && navIdentityValid
     ? navRows.reduce((sum, row) => sum + row.nav * row.annualized, 0) / totalNav : null;
+  const referenceEndDates = Object.fromEntries(rows.map((row) => {
+    if (row.broker === "Futu") return [row.broker, end];
+    const brokerNative = safeNativeBrokerReturn(row.native_return, row.broker);
+    const brokerCalculated = safeCalculatedBrokerReturn(row.calculated_return, row.broker);
+    return [row.broker, brokerNative?.coverage_status === "COMPLETE"
+      ? brokerNative.end_date
+      : brokerCalculated?.coverage_status === "COMPLETE" ? brokerCalculated.end_date : null];
+  }));
   return {
     anchored_contract_id: manualIsV2 ? "anchored_broker_return_v2" : "anchored_broker_return_v1",
     anchored_formula: manualIsV2 ? ANCHORED_BROKER_RETURN_V2_FORMULA : ANCHORED_BROKER_RETURN_FORMULA,
@@ -316,12 +328,14 @@ export function anchoredPortfolioReturnReference(summary) {
       : "OWNER_CONFIRMED_MWR_ANCHOR_PLUS_MODIFIED_DIETZ",
     futu_cumulative: growth - 1,
     futu_annualized_estimate: Number.isFinite(futuAnnualized) ? futuAnnualized : null,
-    portfolio_reference_contract_id: "portfolio_annualized_reference_v1",
+    portfolio_reference_contract_id: "portfolio_annualized_reference_v2",
     portfolio_reference_formula: PORTFOLIO_ANNUALIZED_REFERENCE_FORMULA,
-    portfolio_reference_method: "CURRENT_NAV_WEIGHTED_ESTIMATE",
+    portfolio_reference_method: "LAST_CONFIRMED_POSTCLOSE_NAV_WEIGHTED_ESTIMATE",
     portfolio_annualized_reference: Number.isFinite(combined) ? combined : null,
-    portfolio_reference_brokers: navRows.map((row) => row.broker),
+    portfolio_reference_brokers: rows.map((row) => row.broker),
     missing_reference_brokers: missingReferenceBrokers,
+    nav_as_of: navIdentityValid ? confirmedWeights.holdings_as_of : null,
+    reference_end_dates: referenceEndDates,
     continuation_status: completeContinuation
       ? "CONTINUING"
       : requiresReanchor
@@ -1035,7 +1049,7 @@ export function currentPortfolioReturnReferenceSummary(value) {
       gross_leverage: null,
       source_retrieved_at: row?.source_retrieved_at ?? null,
       manual_return_reference: safeManualReturnReference(null, broker),
-      native_return: null,
+      native_return: safeNativeBrokerReturn(row?.native_return, broker),
       calculated_return: safeCalculatedBrokerReturn(null, broker),
     };
     const rowNav = nativeFiniteNumber(row?.derived_nav_usd);

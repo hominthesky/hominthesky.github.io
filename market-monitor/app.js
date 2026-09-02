@@ -26,7 +26,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260901-1";
+} from "./live_trading.mjs?v=20260902-2";
 import {
   effectiveHoldingsStatus,
   filterHoldingRows,
@@ -38,6 +38,7 @@ const payloadUrl = "./payload.enc.json";
 let monitorData = null;
 let portfolioOverviewSummary = null;
 let portfolioReturnReferenceSummary = null;
+let portfolioReturnWeightSummary = null;
 let unlockKey = null;
 let livePollTimer = null;
 let livePollInFlight = null;
@@ -562,7 +563,14 @@ function renderPortfolioOverview() {
   const annualized = governedReturn && isFiniteMetric(portfolioReturn.annualized_total_return)
     ? portfolioReturn.annualized_total_return
     : null;
-  const anchoredReference = anchoredPortfolioReturnReference(referenceSummary);
+  const anchoredReference = anchoredPortfolioReturnReference(
+    referenceSummary,
+    portfolioReturnWeightSummary,
+  );
+  const referenceEndDateLabel = Object.entries(anchoredReference?.reference_end_dates || {})
+    .filter(([, value]) => value)
+    .map(([broker, value]) => `${broker} ${value}`)
+    .join(" / ");
   const displayedAnnualized = annualized ?? anchoredReference?.portfolio_annualized_reference ?? null;
   const referenceMissingBrokers = Array.isArray(anchoredReference?.missing_reference_brokers)
     ? anchoredReference.missing_reference_brokers : [];
@@ -606,7 +614,7 @@ function renderPortfolioOverview() {
         : "组合年化总回报",
       displayedAnnualized === null ? "—" : pct(displayedAnnualized, 1),
       annualized === null && displayedAnnualized !== null
-        ? `跨券商综合年化参考（当前净资产加权估算） · ${anchoredReference.start_date}—${anchoredReference.end_date}`
+        ? `最近完整日终 NAV 加权参考 · NAV 权重截至 ${anchoredReference.nav_as_of || "—"} · 收益分别截至 ${referenceEndDateLabel || "—"} · 比较估算，非正式组合回报`
         : returnNote,
       {
         definition: TERM_DEFINITIONS.portfolioTotalReturn,
@@ -783,6 +791,10 @@ function mergeLivePayload(payload) {
   };
   const incomingRiskGate = payload?.personal?.risk_gate;
   if (incomingRiskGate && typeof incomingRiskGate === "object") {
+    portfolioReturnWeightSummary = updateLastConfirmedPortfolioOverview(
+      portfolioReturnWeightSummary,
+      incomingRiskGate.last_confirmed_overview,
+    );
     portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
       portfolioOverviewSummary,
       incomingRiskGate.last_confirmed_overview,
@@ -3799,6 +3811,10 @@ byId("unlock-form").addEventListener("submit", async (event) => {
   try {
     const unlocked = await decryptPayload(passwordInput.value);
     monitorData = unlocked.data;
+    portfolioReturnWeightSummary = updateLastConfirmedPortfolioOverview(
+      null,
+      monitorData.personal?.summary?.last_confirmed_overview,
+    );
     portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
       null,
       monitorData.personal?.summary?.last_confirmed_overview,
@@ -3890,6 +3906,7 @@ byId("lock-button").addEventListener("click", () => {
   monitorData = null;
   portfolioOverviewSummary = null;
   portfolioReturnReferenceSummary = null;
+  portfolioReturnWeightSummary = null;
   liveRuntime.transportStatus = LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING";
   liveRuntime.pollState = LIVE_CLIENT.payloadUrl ? "idle" : "disabled";
   liveRuntime.refreshState = LIVE_CLIENT.refreshUrl ? "idle" : "disabled";
