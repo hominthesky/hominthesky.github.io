@@ -36,6 +36,9 @@ import {
   holdingStrategyLabel,
   sanitizePrivateHoldings,
 } from "./holdings_ledger.mjs?v=20260903-1";
+import {
+  createUnlockPersistence,
+} from "./trusted_unlock.mjs?v=20260904-1";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -44,6 +47,8 @@ let portfolioOverviewSummary = null;
 let portfolioReturnReferenceSummary = null;
 let portfolioReturnWeightSummary = null;
 let unlockKey = null;
+let unlockPersistenceRecord = null;
+let unlockPersistenceWarning = "";
 let livePollTimer = null;
 let livePollInFlight = null;
 let holdingsRequestGeneration = 0;
@@ -68,6 +73,7 @@ const LIVE_CLIENT = Object.freeze({
   refreshUrl: metaContent("zzao-live-refresh-url"),
   holdingsUrl: metaContent("zzao-private-holdings-url"),
 });
+const unlockPersistence = createUnlockPersistence({ origin: window.location.origin });
 const STRATEGY_ANALYSIS_FORMULA = "bucket_actual_pct=classified_bucket/total_classified_long; rebalance_amount=total_classified_long*target_pct-classified_bucket; portfolio_twr=portfolio_total_return_v1.cumulative_total_return; portfolio_mwr=portfolio_money_weighted_return_v1.money_weighted_return";
 const STRATEGY_ANALYSIS_CONTRACT = "strategy_analysis_v2";
 const liveRuntime = {
@@ -284,43 +290,106 @@ async function importUnlockKey(password) {
 }
 
 async function decryptEnvelope(envelope, passwordKey) {
-  const key = await crypto.subtle.deriveKey(
-    {
-      name: "PBKDF2",
-      hash: "SHA-256",
-      salt: b64bytes(envelope.salt),
-      iterations: envelope.iterations,
-    },
-    passwordKey,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["decrypt"],
-  );
-  const plaintext = await crypto.subtle.decrypt(
-    {
-      name: "AES-GCM",
-      iv: b64bytes(envelope.iv),
-      tagLength: 128,
-    },
-    key,
-    b64bytes(envelope.ciphertext),
-  );
-  return JSON.parse(new TextDecoder().decode(plaintext));
+  let key;
+  let iv;
+  let ciphertext;
+  try {
+    key = await crypto.subtle.deriveKey(
+      {
+        name: "PBKDF2",
+        hash: "SHA-256",
+        salt: b64bytes(envelope.salt),
+        iterations: envelope.iterations,
+      },
+      passwordKey,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["decrypt"],
+    );
+    iv = b64bytes(envelope.iv);
+    ciphertext = b64bytes(envelope.ciphertext);
+  } catch (error) {
+    const payloadError = new Error("加密数据格式无效，请稍后重试。", { cause: error });
+    payloadError.code = "PAYLOAD_UNAVAILABLE";
+    throw payloadError;
+  }
+
+  let plaintext;
+  try {
+    plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv, tagLength: 128 },
+      key,
+      ciphertext,
+    );
+  } catch (error) {
+    const keyError = new Error("密码不正确，或加密数据已更换。", { cause: error });
+    keyError.code = "UNLOCK_KEY_REJECTED";
+    throw keyError;
+  }
+
+  try {
+    return JSON.parse(new TextDecoder().decode(plaintext));
+  } catch (error) {
+    const payloadError = new Error("解密数据格式无效，请稍后重试。", { cause: error });
+    payloadError.code = "PAYLOAD_UNAVAILABLE";
+    throw payloadError;
+  }
 }
 
 async function fetchEncryptedPayload(url, passwordKey) {
-  const response = await fetch(url, {
-    cache: "no-store",
-    credentials: "omit",
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) throw new Error("加密数据未能读取，请稍后重试。");
-  return decryptEnvelope(await response.json(), passwordKey);
+  let response;
+  let envelope;
+  try {
+    response = await fetch(url, {
+      cache: "no-store",
+      credentials: "omit",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    envelope = await response.json();
+  } catch (error) {
+    const payloadError = new Error("加密数据暂时无法读取，请稍后重试。", { cause: error });
+    payloadError.code = "PAYLOAD_UNAVAILABLE";
+    throw payloadError;
+  }
+  return decryptEnvelope(envelope, passwordKey);
 }
 
 async function decryptPayload(password) {
   const key = await importUnlockKey(password);
   return { data: await fetchEncryptedPayload(payloadUrl, key), key };
+}
+
+function formatUnlockExpiry(timestamp) {
+  if (!Number.isFinite(timestamp)) return "";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
+}
+
+function renderUnlockPersistenceStatus() {
+  const status = byId("unlock-session-status");
+  if (!status) return;
+  if (unlockPersistenceWarning) {
+    status.textContent = "仅本页内存解锁 · 浏览器未保存会话";
+    status.title = unlockPersistenceWarning;
+    return;
+  }
+  if (unlockPersistenceRecord?.mode === "trusted") {
+    status.textContent = `受信任设备 · 至 ${formatUnlockExpiry(unlockPersistenceRecord.expiresAt)}`;
+    status.title = "刷新或重新打开浏览器时可自动恢复；可随时退出并忘记此设备。";
+    return;
+  }
+  if (unlockPersistenceRecord?.mode === "session") {
+    status.textContent = `当前浏览会话 · 至 ${formatUnlockExpiry(unlockPersistenceRecord.expiresAt)}`;
+    status.title = "刷新可自动恢复；复制或恢复标签页时浏览器也可能继承本会话。";
+    return;
+  }
+  status.textContent = "仅本页内存解锁";
+  status.title = "页面刷新后需要重新输入密码。";
 }
 
 function pct(value, digits = 1) {
@@ -3855,40 +3924,151 @@ function renderDashboard() {
   switchView(activeView);
 }
 
+function activateDashboard(unlocked, { persistenceRecord = null, persistenceWarning = "" } = {}) {
+  monitorData = unlocked.data;
+  portfolioCurrentSummary = currentPortfolioDisplaySummary(
+    monitorData.personal?.summary,
+  );
+  portfolioReturnWeightSummary = updateLastConfirmedPortfolioOverview(
+    null,
+    monitorData.personal?.summary?.last_confirmed_overview,
+  );
+  portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
+    null,
+    monitorData.personal?.summary?.last_confirmed_overview,
+  );
+  portfolioReturnReferenceSummary = currentPortfolioReturnReferenceSummary(
+    monitorData.personal?.summary,
+  );
+  unlockKey = unlocked.key;
+  unlockPersistenceRecord = persistenceRecord;
+  unlockPersistenceWarning = persistenceWarning;
+  renderDashboard();
+  renderUnlockPersistenceStatus();
+  void loadPrivateHoldings();
+  byId("unlock-view").hidden = true;
+  byId("dashboard").hidden = false;
+  scheduleLivePolling(0);
+  requestAnimationFrame(() => {
+    byId("dashboard").scrollIntoView({ block: "start" });
+  });
+}
+
+function clearUnlockedDashboard() {
+  stopLivePolling();
+  holdingsRequestGeneration += 1;
+  unlockKey = null;
+  unlockPersistenceRecord = null;
+  unlockPersistenceWarning = "";
+  holdingsRuntime.state = LIVE_CLIENT.holdingsUrl ? "idle" : "disabled";
+  holdingsRuntime.data = null;
+  holdingsRuntime.error = "";
+  monitorData = null;
+  portfolioCurrentSummary = null;
+  portfolioOverviewSummary = null;
+  portfolioReturnReferenceSummary = null;
+  portfolioReturnWeightSummary = null;
+  liveRuntime.transportStatus = LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING";
+  liveRuntime.pollState = LIVE_CLIENT.payloadUrl ? "idle" : "disabled";
+  liveRuntime.refreshState = LIVE_CLIENT.refreshUrl ? "idle" : "disabled";
+  liveRuntime.error = "";
+  liveRuntime.cooldownUntil = 0;
+  liveRuntime.pendingRefresh = null;
+  byId("personal-content").replaceChildren();
+  byId("macro-content").replaceChildren();
+  byId("trading-content").replaceChildren();
+  byId("strategy-content").replaceChildren();
+  byId("holdings-content").replaceChildren();
+  byId("dashboard").hidden = true;
+  byId("unlock-view").hidden = false;
+}
+
+async function restorePersistedUnlock() {
+  const button = byId("unlock-button");
+  const passwordInput = byId("password");
+  const storageNote = byId("unlock-storage-note");
+  button.disabled = true;
+  passwordInput.disabled = true;
+  button.textContent = "正在恢复…";
+  storageNote.textContent = "正在检查本设备的安全解锁记录…";
+  let record = null;
+  try {
+    record = await unlockPersistence.restore();
+    if (!record) {
+      storageNote.textContent = "";
+      return;
+    }
+    const data = await fetchEncryptedPayload(payloadUrl, record.key);
+    storageNote.textContent = "";
+    activateDashboard(
+      { data, key: record.key },
+      { persistenceRecord: record },
+    );
+  } catch (restoreError) {
+    if (record && restoreError?.code === "UNLOCK_KEY_REJECTED") {
+      try {
+        await unlockPersistence.discard(record);
+        storageNote.textContent = "已保存的解锁记录失效，请重新输入密码。";
+      } catch {
+        try {
+          const lockResult = await unlockPersistence.lockCurrentSession();
+          storageNote.textContent = lockResult.trustedCleared
+            ? "已保存的解锁记录失效；因浏览器无法保存会话锁，已清除本设备信任。"
+            : "已保存的解锁记录失效且暂时无法删除；当前浏览会话已停止自动恢复。";
+        } catch {
+          storageNote.textContent =
+            "已保存的解锁记录失效，但浏览器无法删除记录或保存锁定状态；刷新仍可能再次尝试恢复。请清除本站点数据。";
+        }
+      }
+    } else if (record) {
+      storageNote.textContent = "加密数据暂时无法读取；安全解锁记录已保留，刷新即可重试。";
+    } else {
+      storageNote.textContent = "当前浏览器无法保存安全会话；仍可正常输入密码解锁。";
+    }
+  } finally {
+    button.disabled = false;
+    passwordInput.disabled = false;
+    button.textContent = "解锁监控";
+    if (!monitorData) passwordInput.focus();
+  }
+}
+
 byId("unlock-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = byId("unlock-button");
   const error = byId("unlock-error");
   const passwordInput = byId("password");
+  const rememberDevice = byId("remember-device");
+  const storageNote = byId("unlock-storage-note");
   button.disabled = true;
   button.textContent = "正在解密…";
   error.textContent = "";
+  storageNote.textContent = "";
   try {
     const unlocked = await decryptPayload(passwordInput.value);
-    monitorData = unlocked.data;
-    portfolioCurrentSummary = currentPortfolioDisplaySummary(
-      monitorData.personal?.summary,
-    );
-    portfolioReturnWeightSummary = updateLastConfirmedPortfolioOverview(
-      null,
-      monitorData.personal?.summary?.last_confirmed_overview,
-    );
-    portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
-      null,
-      monitorData.personal?.summary?.last_confirmed_overview,
-    );
-    portfolioReturnReferenceSummary = currentPortfolioReturnReferenceSummary(
-      monitorData.personal?.summary,
-    );
-    unlockKey = unlocked.key;
+    let persistenceRecord = null;
+    let persistenceWarning = "";
+    try {
+      persistenceRecord = await unlockPersistence.save(unlocked.key, {
+        trusted: rememberDevice.checked,
+      });
+    } catch (storageError) {
+      persistenceWarning = storageError instanceof Error
+        ? storageError.message
+        : "浏览器安全存储不可用。";
+      if (storageError?.code === "TRUST_REVOCATION_FAILED") {
+        const suppressed = unlockPersistence.suppressAutoRestore();
+        window.alert(
+          suppressed
+            ? "未能确认已撤销旧的受信任设备记录；当前浏览会话已停止自动恢复。请稍后使用“退出并忘记此设备”重试。"
+            : "未能确认已撤销旧的受信任设备记录，浏览器也无法保存锁定状态；新的浏览会话仍可能自动恢复。请清除本站点数据。",
+        );
+      }
+    }
     passwordInput.value = "";
-    renderDashboard();
-    void loadPrivateHoldings();
-    byId("unlock-view").hidden = true;
-    byId("dashboard").hidden = false;
-    scheduleLivePolling(0);
-    requestAnimationFrame(() => {
-      byId("dashboard").scrollIntoView({ block: "start" });
+    activateDashboard(unlocked, {
+      persistenceRecord,
+      persistenceWarning,
     });
   } catch (decryptError) {
     error.textContent =
@@ -3950,30 +4130,39 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-byId("lock-button").addEventListener("click", () => {
-  stopLivePolling();
-  holdingsRequestGeneration += 1;
-  unlockKey = null;
-  holdingsRuntime.state = LIVE_CLIENT.holdingsUrl ? "idle" : "disabled";
-  holdingsRuntime.data = null;
-  holdingsRuntime.error = "";
-  monitorData = null;
-  portfolioCurrentSummary = null;
-  portfolioOverviewSummary = null;
-  portfolioReturnReferenceSummary = null;
-  portfolioReturnWeightSummary = null;
-  liveRuntime.transportStatus = LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING";
-  liveRuntime.pollState = LIVE_CLIENT.payloadUrl ? "idle" : "disabled";
-  liveRuntime.refreshState = LIVE_CLIENT.refreshUrl ? "idle" : "disabled";
-  liveRuntime.error = "";
-  liveRuntime.cooldownUntil = 0;
-  liveRuntime.pendingRefresh = null;
-  byId("personal-content").replaceChildren();
-  byId("macro-content").replaceChildren();
-  byId("trading-content").replaceChildren();
-  byId("strategy-content").replaceChildren();
-  byId("holdings-content").replaceChildren();
-  byId("dashboard").hidden = true;
-  byId("unlock-view").hidden = false;
+byId("lock-button").addEventListener("click", async () => {
+  let lockMessage = "页面已锁定；当前浏览会话不会自动恢复。";
+  try {
+    const result = await unlockPersistence.lockCurrentSession();
+    if (result.trustedCleared) {
+      lockMessage = "页面已锁定；因浏览器无法保存会话锁，已同时清除本设备信任。";
+    }
+  } catch {
+    lockMessage =
+      "当前页面已清除，但浏览器无法保存锁定状态或删除设备信任；刷新可能自动恢复。请关闭页面并清除本站点数据。";
+  }
+  clearUnlockedDashboard();
+  byId("unlock-storage-note").textContent = lockMessage;
   byId("password").focus();
 });
+
+byId("forget-device-button").addEventListener("click", async () => {
+  const confirmed = window.confirm(
+    "退出并删除此浏览器保存的全部解锁密钥？之后需要重新输入密码。",
+  );
+  if (!confirmed) return;
+  const button = byId("forget-device-button");
+  button.disabled = true;
+  try {
+    await unlockPersistence.clearAll();
+    clearUnlockedDashboard();
+    byId("unlock-storage-note").textContent = "已退出并忘记此设备。";
+    byId("password").focus();
+  } catch {
+    window.alert("未能清除此设备的安全解锁记录；页面保持解锁，请稍后重试。");
+  } finally {
+    button.disabled = false;
+  }
+});
+
+void restorePersistedUnlock();

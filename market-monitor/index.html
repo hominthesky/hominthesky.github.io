@@ -16,9 +16,9 @@
     <title>市场杠杆与持仓风险监控</title>
     <link rel="icon" href="./favicon.ico?v=20260801-1" />
     <link rel="shortcut icon" href="./favicon.ico?v=20260801-1" />
-    <link rel="stylesheet" href="./styles.css?v=20260902-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260904-1" />
     <script src="./unlock_security.js?v=20260806-1"></script>
-    <script type="module" src="./app.js?v=20260904-1"></script>
+    <script type="module" src="./app.js?v=20260904-2"></script>
   </head>
   <body>
     <main id="unlock-view" class="unlock-view">
@@ -44,10 +44,18 @@
             />
             <button id="unlock-button" type="submit">解锁监控</button>
           </div>
+          <label class="trusted-device-option" for="remember-device">
+            <input id="remember-device" type="checkbox" />
+            <span>信任此设备 30 天</span>
+          </label>
+          <p class="trusted-device-help">
+            未勾选时保持当前浏览会话 12 小时（复制或恢复标签页可能继承）；共享设备请勿勾选。
+          </p>
           <p id="unlock-error" class="form-error" role="alert" aria-live="polite"></p>
+          <p id="unlock-storage-note" class="unlock-storage-note" aria-live="polite"></p>
         </form>
         <p class="security-note">
-          密码只用于本机解密，不会被应用主动上传或保存；请勿把密码放入网址或分享。静态页面不提供服务器端身份认证。
+          密码不会被上传或保存；启用信任后仅保存浏览器生成的不可导出解锁密钥。请勿把密码放入网址或分享。静态页面不提供服务器端身份认证。
         </p>
       </section>
     </main>
@@ -110,6 +118,11 @@
           <button id="lock-button" class="drawer-utility" type="button">
             <span class="drawer-icon" aria-hidden="true">⌁</span>
             <span class="drawer-label">锁定页面</span>
+          </button>
+          <p id="unlock-session-status" class="unlock-session-status" aria-live="polite"></p>
+          <button id="forget-device-button" class="drawer-utility forget-device-button" type="button">
+            <span class="drawer-icon" aria-hidden="true">×</span>
+            <span class="drawer-label">退出并忘记此设备</span>
           </button>
         </div>
       </aside>

@@ -486,6 +486,7 @@ input {
 .dashboard.drawer-collapsed .drawer-brand-copy,
 .dashboard.drawer-collapsed .drawer-group-label,
 .dashboard.drawer-collapsed .drawer-label,
+.dashboard.drawer-collapsed .unlock-session-status,
 .dashboard.drawer-collapsed .drawer-item .tab-count {
   display: none;
 }
@@ -553,8 +554,13 @@ input:focus-visible {
   .dashboard.drawer-collapsed .drawer-brand-copy,
   .dashboard.drawer-collapsed .drawer-group-label,
   .dashboard.drawer-collapsed .drawer-label,
+  .dashboard.drawer-collapsed .unlock-session-status,
   .dashboard.drawer-collapsed .drawer-item .tab-count {
     display: initial;
+  }
+
+  .dashboard.drawer-collapsed .unlock-session-status {
+    display: block;
   }
 
   .dashboard.drawer-collapsed .drawer-topline,
@@ -785,10 +791,56 @@ input:focus {
   font-size: 13px;
 }
 
+.trusted-device-option {
+  display: flex;
+  align-items: center;
+  width: fit-content;
+  gap: 10px;
+  margin: 16px 0 0;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.trusted-device-option input {
+  flex: 0 0 18px;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--cyan);
+}
+
+.trusted-device-help,
+.unlock-storage-note {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.unlock-storage-note {
+  min-height: 18px;
+}
+
 .security-note {
   margin: 20px 0 0;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.unlock-session-status {
+  margin: 5px 12px 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.forget-device-button {
+  color: var(--muted);
 }
 
 .dashboard {
