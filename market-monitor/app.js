@@ -647,7 +647,7 @@ function renderPortfolioOverview() {
     ),
     overviewMetric(
       annualized === null && displayedAnnualized !== null
-        ? "跨券商综合年化参考"
+        ? "跨券商综合年化参考（估算）"
         : "组合年化总回报",
       displayedAnnualized === null ? "—" : pct(displayedAnnualized, 1),
       annualized === null && displayedAnnualized !== null
