@@ -1024,10 +1024,50 @@ function confirmedPortfolioOverviewCandidate(value) {
   return result;
 }
 
-export function currentPortfolioReturnReferenceSummary(value) {
+function confirmedHistoricalPortfolioOverviewCandidate(value) {
+  if (value?.confirmation_kind !== "POSTCLOSE_HISTORY") return null;
+  return confirmedPortfolioOverviewCandidate(value);
+}
+
+function unavailableCurrentPortfolioSummary(value, sourceStatus) {
+  const expectedBrokers = Array.isArray(value?.expected_brokers)
+    && value.expected_brokers.length === 3
+    && new Set(value.expected_brokers).size === value.expected_brokers.length
+    && value.expected_brokers.every((broker) => ALLOWED_LIVE_BROKERS.has(broker))
+    ? [...value.expected_brokers] : [];
+  return {
+    source_status: sourceStatus,
+    derived_nav_usd: null,
+    gross_market_value_usd: null,
+    gross_leverage: null,
+    gross_leverage_red: nativeFiniteNumber(value?.gross_leverage_red),
+    source_retrieved_at: timestamp(value?.source_retrieved_at) === null
+      ? null : value.source_retrieved_at,
+    holdings_as_of: value?.holdings_as_of ?? null,
+    source_label: value?.source_label ?? null,
+    expected_brokers: expectedBrokers,
+    broker_breakdown: expectedBrokers.map((broker) => ({
+      broker,
+      source_status: sourceStatus,
+      derived_nav_usd: null,
+      gross_market_value_usd: null,
+      gross_leverage: null,
+      source_retrieved_at: null,
+      manual_return_reference: safeManualReturnReference(null, broker),
+      native_return: safeNativeBrokerReturn(null, broker),
+      calculated_return: safeCalculatedBrokerReturn(null, broker),
+    })),
+  };
+}
+
+function sanitizeCurrentPortfolioSummary(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (value.confirmation_kind === "POSTCLOSE_HISTORY") return null;
   const summaryStatus = String(value.source_status || "").toUpperCase();
   if (summaryStatus === HEALTHY) return confirmedPortfolioOverviewCandidate(value);
+  if (summaryStatus !== "PARTIAL" && SOURCE_FAILURE_STATES.has(summaryStatus)) {
+    return unavailableCurrentPortfolioSummary(value, summaryStatus);
+  }
   if (summaryStatus !== "PARTIAL" || timestamp(value.source_retrieved_at) === null) return null;
   const breakdown = Array.isArray(value.broker_breakdown) ? value.broker_breakdown : [];
   const expectedBrokers = Array.isArray(value.expected_brokers) ? value.expected_brokers : [];
@@ -1091,9 +1131,55 @@ export function currentPortfolioReturnReferenceSummary(value) {
   };
 }
 
+export function currentPortfolioDisplaySummary(value, nowMs = Date.now()) {
+  const current = sanitizeCurrentPortfolioSummary(value);
+  if (!current) return null;
+  const retrievedAt = timestamp(current.source_retrieved_at);
+  if (retrievedAt !== null && retrievedAt > Number(nowMs) + MAX_FUTURE_CLOCK_SKEW_MS) {
+    return {
+      ...unavailableCurrentPortfolioSummary(current, "MISSING"),
+      source_retrieved_at: null,
+    };
+  }
+  if (current.source_status !== HEALTHY && current.source_status !== "PARTIAL") return current;
+  if (retrievedAt === null) return unavailableCurrentPortfolioSummary(current, "MISSING");
+  if (Number(nowMs) - retrievedAt > PORTFOLIO_GATE_STALE_AFTER_MS) {
+    return unavailableCurrentPortfolioSummary(current, "STALE");
+  }
+  return current;
+}
+
+export function currentPortfolioReturnReferenceSummary(value) {
+  return sanitizeCurrentPortfolioSummary(value);
+}
+
+export function portfolioOverviewPresentation(currentValue, lastConfirmedValue, nowMs = Date.now()) {
+  const current = currentPortfolioDisplaySummary(currentValue, nowMs);
+  const lastConfirmed = confirmedHistoricalPortfolioOverviewCandidate(lastConfirmedValue);
+  const sourceStatus = String(current?.source_status || "MISSING").toUpperCase();
+  const complete = sourceStatus === HEALTHY;
+  const brokerRows = Array.isArray(current?.broker_breakdown)
+    ? current.broker_breakdown : [];
+  const expectedBrokers = Array.isArray(current?.expected_brokers)
+    ? current.expected_brokers : [];
+  const brokerStatus = new Map(brokerRows.map((row) => [row.broker, row.source_status]));
+  return {
+    source_status: sourceStatus,
+    source_retrieved_at: current?.source_retrieved_at ?? null,
+    derived_nav_usd: complete ? current.derived_nav_usd : null,
+    gross_market_value_usd: complete ? current.gross_market_value_usd : null,
+    gross_leverage: complete ? current.gross_leverage : null,
+    gross_leverage_red: current?.gross_leverage_red ?? null,
+    expected_brokers: [...expectedBrokers],
+    missing_brokers: expectedBrokers.filter((broker) => brokerStatus.get(broker) !== HEALTHY),
+    broker_breakdown: brokerRows,
+    last_confirmed: lastConfirmed,
+  };
+}
+
 export function updateLastConfirmedPortfolioOverview(current, incoming) {
-  const previous = confirmedPortfolioOverviewCandidate(current);
-  const next = confirmedPortfolioOverviewCandidate(incoming);
+  const previous = confirmedHistoricalPortfolioOverviewCandidate(current);
+  const next = confirmedHistoricalPortfolioOverviewCandidate(incoming);
   if (!next) return previous;
   if (previous
     && timestamp(next.source_retrieved_at) < timestamp(previous.source_retrieved_at)) {

@@ -11,6 +11,7 @@ import {
   calculateDailyTarget,
   calculateLivingExpenseCoverage,
   combineHealthStatuses,
+  currentPortfolioDisplaySummary,
   currentPortfolioReturnReferenceSummary,
   deriveFxStatus,
   derivePortfolioGateInput,
@@ -18,6 +19,7 @@ import {
   isPeriodCoverageComplete,
   manualRefreshLabel,
   periodDecisionComplete,
+  portfolioOverviewPresentation,
   refreshProofMessage,
   resolveLiveCashflowDisplay,
   resolveLiveRealizedTradingDisplay,
@@ -26,7 +28,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260902-2";
+} from "./live_trading.mjs?v=20260903-1";
 import {
   dashboardStatusForView,
   effectiveHoldingsStatus,
@@ -37,6 +39,7 @@ import {
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
+let portfolioCurrentSummary = null;
 let portfolioOverviewSummary = null;
 let portfolioReturnReferenceSummary = null;
 let portfolioReturnWeightSummary = null;
@@ -473,6 +476,7 @@ function renderLiveOnly() {
   if (!region) return;
   region.replaceChildren(renderLiveTrading(monitorData.trading || {}));
   if (activeView === "personal") renderPersonal();
+  if (activeView === "strategy") renderStrategy();
 }
 
 const PORTFOLIO_RETURN_REASON_LABELS = Object.freeze({
@@ -541,7 +545,12 @@ function renderPortfolioOverview() {
   if (!root || !monitorData) return;
   root.replaceChildren();
   const riskSummary = monitorData.personal?.summary || {};
-  const summary = portfolioOverviewSummary || {};
+  const presentation = portfolioOverviewPresentation(
+    portfolioCurrentSummary,
+    portfolioOverviewSummary,
+  );
+  const summary = presentation;
+  const lastConfirmed = presentation.last_confirmed;
   const referenceSummary = portfolioReturnReferenceSummary || {};
   const brokerRows = Array.isArray(summary.broker_breakdown)
     ? summary.broker_breakdown.filter((row) => ["Futu", "Tiger", "IBKR"].includes(row?.broker))
@@ -549,6 +558,24 @@ function renderPortfolioOverview() {
   const brokerByName = new Map(brokerRows.map((row) => [row.broker, row]));
   const orderedBrokers = ["Futu", "Tiger", "IBKR"]
     .map((broker) => brokerByName.get(broker)).filter(Boolean);
+  const currentComplete = summary.source_status === "OK";
+  const missingBrokerLabel = summary.missing_brokers.length
+    ? summary.missing_brokers.join("/") : "部分券商";
+  const historicalNavDetail = !currentComplete && lastConfirmed
+    ? [{
+      label: "上次完整三券商",
+      value: usd(lastConfirmed.derived_nav_usd, true),
+      note: `仅供历史参考 · ${liveTime(lastConfirmed.source_retrieved_at)}`,
+    }]
+    : [];
+  const historicalLeverageDetail = !currentComplete && lastConfirmed
+    ? [{
+      label: "上次完整三券商",
+      value: isFiniteMetric(lastConfirmed.gross_leverage)
+        ? `${number(lastConfirmed.gross_leverage, 2)}x` : "—",
+      note: `仅供历史参考 · ${liveTime(lastConfirmed.source_retrieved_at)}`,
+    }]
+    : [];
   const referenceRows = Array.isArray(referenceSummary.broker_breakdown)
     ? referenceSummary.broker_breakdown.filter((row) => ["Futu", "Tiger", "IBKR"].includes(row?.broker))
     : [];
@@ -599,14 +626,23 @@ function renderPortfolioOverview() {
   append(
     grid,
     overviewMetric(
-      "跨券商总净资产",
+      "跨券商当前总净资产",
       usd(summary.derived_nav_usd, true),
-      isFiniteMetric(summary.derived_nav_usd)
-        ? `${summary.confirmation_kind === "POSTCLOSE_HISTORY" ? "最近完整日终确认" : "最近确认"} · ${liveTime(summary.source_retrieved_at)}`
-        : "尚无完整券商组合快照",
+      currentComplete
+        ? `当前完整批次 · ${liveTime(summary.source_retrieved_at)}`
+        : summary.source_retrieved_at
+          ? `当前批次缺 ${missingBrokerLabel}，三券商总额不计算 · ${liveTime(summary.source_retrieved_at)}`
+          : "当前三券商批次不可确认",
       {
         definition: TERM_DEFINITIONS.portfolioNav,
-        details: orderedBrokers.map((row) => ({ label: row.broker, value: usd(row.derived_nav_usd, true) })),
+        details: [
+          ...orderedBrokers.map((row) => ({
+            label: row.broker,
+            value: usd(row.derived_nav_usd, true),
+            note: row.source_status === "OK" ? "当前批次" : `当前来源 ${row.source_status}`,
+          })),
+          ...historicalNavDetail,
+        ],
       },
     ),
     overviewMetric(
@@ -732,9 +768,11 @@ function renderPortfolioOverview() {
       isFiniteMetric(summary.gross_leverage)
         ? `${number(summary.gross_leverage, 2)}x`
         : "—",
-      isFiniteMetric(summary.gross_leverage_red)
-        ? `治理红线 ${number(summary.gross_leverage_red, 2)}x`
-        : "覆盖不足不估算",
+      currentComplete && isFiniteMetric(summary.gross_leverage_red)
+        ? `当前完整批次 · 治理红线 ${number(summary.gross_leverage_red, 2)}x`
+        : summary.source_retrieved_at
+          ? `当前批次缺 ${missingBrokerLabel}，组合杠杆不计算`
+          : "当前覆盖不足不估算",
       {
         definition: TERM_DEFINITIONS.grossLeverage,
         tone:
@@ -743,10 +781,14 @@ function renderPortfolioOverview() {
           summary.gross_leverage >= summary.gross_leverage_red
             ? "negative"
             : "",
-        details: orderedBrokers.map((row) => ({
-          label: row.broker,
-          value: isFiniteMetric(row.gross_leverage) ? `${number(row.gross_leverage, 2)}x` : "—",
-        })),
+        details: [
+          ...orderedBrokers.map((row) => ({
+            label: row.broker,
+            value: isFiniteMetric(row.gross_leverage) ? `${number(row.gross_leverage, 2)}x` : "—",
+            note: row.source_status === "OK" ? "当前批次" : `当前来源 ${row.source_status}`,
+          })),
+          ...historicalLeverageDetail,
+        ],
       },
     ),
   );
@@ -792,6 +834,7 @@ function mergeLivePayload(payload) {
   };
   const incomingRiskGate = payload?.personal?.risk_gate;
   if (incomingRiskGate && typeof incomingRiskGate === "object") {
+    portfolioCurrentSummary = currentPortfolioDisplaySummary(incomingRiskGate);
     portfolioReturnWeightSummary = updateLastConfirmedPortfolioOverview(
       portfolioReturnWeightSummary,
       incomingRiskGate.last_confirmed_overview,
@@ -799,10 +842,6 @@ function mergeLivePayload(payload) {
     portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
       portfolioOverviewSummary,
       incomingRiskGate.last_confirmed_overview,
-    );
-    portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
-      portfolioOverviewSummary,
-      incomingRiskGate,
     );
     portfolioReturnReferenceSummary = currentPortfolioReturnReferenceSummary(incomingRiskGate);
     monitorData.personal = applyLiveRiskGate(monitorData.personal, incomingRiskGate);
@@ -3234,7 +3273,7 @@ function renderStrategyAllocation(data) {
     const card = el("article", `strategy-bucket-card ${bucket.status.toLowerCase()}`);
     const amount = isFiniteMetric(bucket.rebalance_amount_usd)
       ? `${bucket.rebalance_amount_usd >= 0 ? "补足" : "降低"} ${usd(Math.abs(bucket.rebalance_amount_usd), true)}`
-      : portfolioOverviewSummary?.portfolio_gate === "RED"
+      : monitorData.personal?.summary?.portfolio_gate === "RED"
         ? "红色风险闸门：暂停金额建议"
         : allocation.status !== "COMPLETE"
           ? "数据覆盖不足：金额暂缓"
@@ -3605,8 +3644,9 @@ function renderStrategy() {
   const brokerSection = section("逐券商策略复盘", "Futu、Tiger 与 IBKR 独立列示；IBKR 当前只有原生 TWR，不把缺失的 MWR 或盈亏补成零。 ");
   const brokerGrid = el("div", "strategy-broker-grid");
   const brokerNotes = [];
-  const currentBrokers = Array.isArray(portfolioOverviewSummary?.broker_breakdown)
-    ? portfolioOverviewSummary.broker_breakdown : [];
+  const strategyCurrentSummary = currentPortfolioDisplaySummary(portfolioCurrentSummary);
+  const currentBrokers = Array.isArray(strategyCurrentSummary?.broker_breakdown)
+    ? strategyCurrentSummary.broker_breakdown : [];
   for (const broker of ["Futu", "Tiger", "IBKR"]) {
     const rows = annual.filter((row) => row.broker === broker).sort((a, b) => b.year - a.year)
       .map((row) => ({ ...row, pnl_display: strategyOriginalPnl(row) }));
@@ -3615,7 +3655,7 @@ function renderStrategy() {
     const brokerHead = el("div", "strategy-broker-head");
     append(brokerHead,
       el("h3", "", broker),
-      el("span", "", `净资产 ${usd(current?.derived_nav_usd, true)} · 毛杠杆 ${isFiniteMetric(current?.gross_leverage) ? `${number(current.gross_leverage, 2)}x` : "—"}`),
+      el("span", "", `净资产 ${usd(current?.derived_nav_usd, true)} · 毛杠杆 ${isFiniteMetric(current?.gross_leverage) ? `${number(current.gross_leverage, 2)}x` : "—"} · ${current?.source_status || strategyCurrentSummary?.source_status || "MISSING"}${strategyCurrentSummary?.source_retrieved_at ? ` · ${liveTime(strategyCurrentSummary.source_retrieved_at)}` : ""}`),
     );
     card.appendChild(brokerHead);
     card.appendChild(table([
@@ -3826,6 +3866,9 @@ byId("unlock-form").addEventListener("submit", async (event) => {
   try {
     const unlocked = await decryptPayload(passwordInput.value);
     monitorData = unlocked.data;
+    portfolioCurrentSummary = currentPortfolioDisplaySummary(
+      monitorData.personal?.summary,
+    );
     portfolioReturnWeightSummary = updateLastConfirmedPortfolioOverview(
       null,
       monitorData.personal?.summary?.last_confirmed_overview,
@@ -3833,10 +3876,6 @@ byId("unlock-form").addEventListener("submit", async (event) => {
     portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
       null,
       monitorData.personal?.summary?.last_confirmed_overview,
-    );
-    portfolioOverviewSummary = updateLastConfirmedPortfolioOverview(
-      portfolioOverviewSummary,
-      monitorData.personal?.summary,
     );
     portfolioReturnReferenceSummary = currentPortfolioReturnReferenceSummary(
       monitorData.personal?.summary,
@@ -3919,6 +3958,7 @@ byId("lock-button").addEventListener("click", () => {
   holdingsRuntime.data = null;
   holdingsRuntime.error = "";
   monitorData = null;
+  portfolioCurrentSummary = null;
   portfolioOverviewSummary = null;
   portfolioReturnReferenceSummary = null;
   portfolioReturnWeightSummary = null;
