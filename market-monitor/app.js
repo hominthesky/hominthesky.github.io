@@ -28,11 +28,12 @@ import {
   yearCoverageLabel,
 } from "./live_trading.mjs?v=20260902-2";
 import {
+  dashboardStatusForView,
   effectiveHoldingsStatus,
   filterHoldingRows,
   holdingStrategyLabel,
   sanitizePrivateHoldings,
-} from "./holdings_ledger.mjs?v=20260823-1";
+} from "./holdings_ledger.mjs?v=20260903-1";
 
 const payloadUrl = "./payload.enc.json";
 let monitorData = null;
@@ -899,6 +900,7 @@ async function loadPrivateHoldings() {
   const requestGeneration = ++holdingsRequestGeneration;
   holdingsRuntime.state = "loading";
   holdingsRuntime.error = "";
+  renderSnapshotStatus();
   renderHoldings();
   try {
     const holdingsPath = new URL(LIVE_CLIENT.holdingsUrl, window.location.href).pathname;
@@ -942,6 +944,7 @@ async function loadPrivateHoldings() {
 function renderHoldingsSourceAlert() {
   byId("holdings-source-alert").textContent = holdingsRuntime.state === "ready"
     && effectiveHoldingsStatus(holdingsRuntime.data) === "OK" ? "" : "· !";
+  renderSnapshotStatus();
 }
 
 function refreshHoldingsFreshnessDisplay() {
@@ -3677,6 +3680,19 @@ function setDrawerOpen(open) {
   byId("mobile-menu-button").setAttribute("aria-expanded", String(open));
 }
 
+function renderSnapshotStatus() {
+  if (!monitorData) return;
+  const resolved = dashboardStatusForView(
+    activeView,
+    monitorData.meta?.status,
+    holdingsRuntime.state,
+    holdingsRuntime.data,
+  );
+  const status = byId("snapshot-status");
+  status.textContent = resolved.text;
+  status.className = `status-pill ${resolved.tone}`;
+}
+
 function switchView(view) {
   if (!VIEW_META[view]) view = "personal";
   activeView = view;
@@ -3692,6 +3708,7 @@ function switchView(view) {
   byId("page-eyebrow").textContent = meta.eyebrow;
   byId("page-title").textContent = meta.title;
   byId("page-subtitle").textContent = meta.subtitle;
+  renderSnapshotStatus();
   const chartTooltip = byId("trading-chart-tooltip");
   if (chartTooltip) chartTooltip.hidden = true;
   setDrawerOpen(false);
@@ -3771,9 +3788,7 @@ function renderDashboard() {
         : "CNY 展示汇率暂不可用",
     ),
   );
-  const status = byId("snapshot-status");
-  status.textContent = meta.status === "ready" ? "数据已就绪" : "数据部分可用";
-  status.className = `status-pill ${meta.status === "ready" ? "green" : "amber"}`;
+  renderSnapshotStatus();
   byId("personal-tab-alert").textContent = monitorData.personal.alerts.length
     ? `· ${monitorData.personal.alerts.length}`
     : "";

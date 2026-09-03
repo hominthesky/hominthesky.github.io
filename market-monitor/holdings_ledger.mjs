@@ -28,6 +28,7 @@ const HOLDINGS_REASONS = new Set([
   "ROLLBACK_SOURCE_HAS_NO_HOLDINGS_LEDGER",
   "ROLLBACK_SOURCE_READ_FAILED",
   "ROLLBACK_SOURCE_INVALID",
+  "PORTFOLIO_BATCH_MISALIGNED",
 ]);
 
 const nativeNumber = (value) => (
@@ -277,6 +278,33 @@ export function effectiveHoldingsStatus(value, nowMs = Date.now(), staleAfterMs 
   if (!Number.isFinite(observedAt) || !Number.isFinite(nowMs) || !Number.isFinite(staleAfterMs)
     || staleAfterMs <= 0 || nowMs < observedAt || nowMs - observedAt > staleAfterMs) return "STALE";
   return "OK";
+}
+
+export function dashboardStatusForView(view, publicStatus, holdingsState, holdingsData) {
+  if (view !== "holdings") {
+    return publicStatus === "ready"
+      ? { text: "数据已就绪", tone: "green" }
+      : { text: "数据部分可用", tone: "amber" };
+  }
+  if (holdingsState !== "ready") {
+    const text = {
+      loading: "正在读取持仓",
+      error: "持仓数据读取失败",
+      disabled: "持仓数据未启用",
+    }[holdingsState] || "持仓数据待读取";
+    return { text, tone: "amber" };
+  }
+  const status = effectiveHoldingsStatus(holdingsData);
+  return {
+    text: {
+      OK: "持仓数据已就绪",
+      PARTIAL: "持仓数据部分可用",
+      STALE: "持仓数据已过期",
+      MISSING: "持仓数据缺失",
+      FAILED: "持仓数据读取失败",
+    }[status],
+    tone: status === "OK" ? "green" : "amber",
+  };
 }
 
 export function filterHoldingRows(rows, filters = {}) {
