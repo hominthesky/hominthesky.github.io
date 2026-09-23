@@ -2278,9 +2278,11 @@ input:focus {
 table {
   width: 100%;
   border-collapse: collapse;
-  /* 700px keeps generic tables inside a 1024-1080px content column
-     (0.92vw - 236px); 760px crossed that line at vw≈1082 and left-anchored
-     every table into a scroll at exactly 1080px-wide portrait monitors. */
+  /* 700px floor keeps generic tables inside the content column from
+     1080px (757.6px) upward; 760px crossed that line at vw≈1082 and
+     left-anchored every table at exactly 1080px portrait monitors. At
+     1024px with a classic ~17px scrollbar (~689px column) generic tables
+     may scroll ~11px inside .table-wrap — accepted, contained. */
   min-width: 700px;
 }
 
@@ -3741,12 +3743,16 @@ footer {
   padding-inline: 0;
 }
 
-/* 901-1160px: the six-track holdings rail bottoms out at 830px of minimum
-   track width while the content column is 593-831px wide, so the grid pushed
-   the whole document past the viewport (a 1080px portrait monitor overflowed
-   by ~29px). Three equal tracks keep the rail inside the content column;
-   ≤900px keeps its own two-track rule. */
-@media (max-width: 1160px) {
+/* 900-1180px: the six-track holdings rail is rigid below 830px
+   (170px + 5x120px tracks + 5x12px gaps), wider than this range's content
+   column (0.92 * media width - 236px). With a classic ~17px scrollbar the
+   rail only fits again from ~1177px ((236 + 830 + 17) / 0.92), so the upper
+   bound is 1180. Level 4 range syntax keeps the band seamless across the
+   900px boundary: fractional viewports (e.g. 900.5px from browser zoom or
+   device-pixel scaling) match this block instead of falling through to the
+   rigid base rule, while the <=900px two-track rule stays authoritative at
+   and below 900. */
+@media (900px < width) and (width <= 1180px) {
   .holdings-controls {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
