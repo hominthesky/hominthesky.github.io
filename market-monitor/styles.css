@@ -529,51 +529,10 @@ input:focus-visible {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@media (max-width: 900px) {
-  .app-drawer,
-  .dashboard.drawer-collapsed .app-drawer {
-    width: min(280px, calc(100vw - 48px));
-    transform: translateX(-105%);
-    box-shadow: var(--shadow);
-  }
-
-  .dashboard.drawer-open .app-drawer {
-    transform: translateX(0);
-  }
-
-  .app-main,
-  .dashboard.drawer-collapsed .app-main {
-    margin-left: 0;
-    padding: 24px clamp(16px, 4vw, 32px) 28px;
-  }
-
-  .mobile-menu-button {
-    display: grid;
-  }
-
-  .dashboard.drawer-collapsed .drawer-brand-copy,
-  .dashboard.drawer-collapsed .drawer-group-label,
-  .dashboard.drawer-collapsed .drawer-label,
-  .dashboard.drawer-collapsed .unlock-session-status,
-  .dashboard.drawer-collapsed .drawer-item .tab-count {
-    display: initial;
-  }
-
-  .dashboard.drawer-collapsed .unlock-session-status {
-    display: block;
-  }
-
-  .dashboard.drawer-collapsed .drawer-topline,
-  .dashboard.drawer-collapsed .currency-control {
-    flex-direction: row;
-  }
-
-  .dashboard.drawer-collapsed .drawer-item,
-  .dashboard.drawer-collapsed .drawer-utility {
-    justify-content: flex-start;
-    padding: 0 11px;
-  }
-}
+/* The <=900px drawer rules (off-canvas transform, open toggle, collapsed
+   state restoration) live once in the 2026 precision layer near the end of
+   this file; earlier duplicates were removed during the breakpoint-system
+   cleanup. */
 
 @media (max-width: 720px) {
   .dashboard {
@@ -843,11 +802,10 @@ input:focus {
   color: var(--muted);
 }
 
-.dashboard {
-  width: min(1440px, calc(100% - 40px));
-  margin: 0 auto;
-  padding: 44px 0 28px;
-}
+/* Retired block: an earlier-era centered 1440px dashboard. The precision
+   shell later in this file wins the cascade for every declaration here
+   (width/margin/padding), so the block was dead weight and has been
+   removed; see the annotated `.dashboard` rule in the 2026 precision layer. */
 
 .dashboard-header {
   display: flex;
@@ -1761,7 +1719,10 @@ input:focus {
 .trading-cashflow-chart {
   display: block;
   width: 100%;
-  min-width: 620px;
+  /* 560px keeps the chart scroll-free from the 901px band up: the >900px
+     content column is 0.92 * media width - 236px, which bottoms out at
+     ~593px — 620px forced a ~27px in-container scroll at 901-929px. */
+  min-width: 560px;
   height: 250px;
 }
 
@@ -2360,7 +2321,7 @@ tbody tr:last-child td {
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 18px;
 }
@@ -2480,37 +2441,6 @@ footer {
   line-height: 1.6;
 }
 
-@media (max-width: 940px) {
-  .metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .trading-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .trading-chart-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .trading-chart-summary-period,
-  .trading-chart-summary-item {
-    padding: 10px 12px;
-    border: 0;
-    border-top: 1px solid var(--line);
-  }
-
-  .trading-chart-summary-period,
-  .trading-chart-summary-item:nth-child(2) { border-top: 0; }
-
-  .trading-chart-summary-period,
-  .trading-chart-summary-item:nth-child(3) { padding-left: 0; }
-
-  .trading-chart-summary-item:nth-child(even) {
-    border-left: 1px solid var(--line);
-  }
-}
-
 @media (max-width: 720px) {
   .unlock-card {
     padding: 30px 22px;
@@ -2525,11 +2455,6 @@ footer {
   #unlock-button {
     width: 100%;
     min-height: 48px;
-  }
-
-  .dashboard {
-    width: min(100% - 24px, 1440px);
-    padding-top: 26px;
   }
 
   .header-actions {
@@ -2909,20 +2834,17 @@ footer {
 .holdings-quality-list { display: grid; gap: 7px; margin: 0; padding: 0 34px 16px; color: var(--text-secondary); line-height: 1.5; }
 
 @media (max-width: 900px) {
-  .strategy-summary-grid, .strategy-bucket-grid { grid-template-columns: 1fr; }
-  .strategy-summary-card { border-right: 0; border-bottom: 1px solid var(--line); }
-  .strategy-summary-card:last-child { border-bottom: 0; }
-  .strategy-broker-grid, .strategy-quality-grid { grid-template-columns: 1fr; }
+  /* Summary/broker grids moved: the three summary rails collapse at the
+     1100px band (see the precision layer) and the broker grid at its own
+     1000px/1380px bands; only bucket/quality/margin rules stay here. */
+  .strategy-bucket-grid { grid-template-columns: 1fr; }
+  .strategy-quality-grid { grid-template-columns: 1fr; }
   .strategy-trend-controls { justify-content: flex-start; margin: 0 0 14px; }
   .strategy-trend,
-  .strategy-broker-grid,
   .strategy-allocation,
   .strategy-instrument-types,
   .strategy-insight-list,
   .strategy-quality-grid { margin-right: 16px; margin-bottom: 16px; margin-left: 16px; }
-  .holdings-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .holdings-summary-card:nth-child(2) { border-right: 0; }
-  .holdings-summary-card:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
   .holdings-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-right: 16px; padding-left: 16px; }
   .holdings-search-field { grid-column: 1 / -1; }
   .holdings-broker-grid,
@@ -2939,9 +2861,16 @@ footer {
   .strategy-allocation-bar { min-height: 38px; }
   .strategy-allocation-segment { font-size: 0; }
   .holdings-hero { align-items: flex-start; flex-direction: column; }
-  .holdings-summary-grid { grid-template-columns: 1fr; }
-  .holdings-summary-card { border-right: 0; border-bottom: 1px solid var(--line); }
-  .holdings-summary-card:last-child { border-bottom: 0; }
+  /* Both summary rails go single-column here. The strategy rail has no
+     base-rule fallback anymore (its old <=900px rule was retired in the
+     P3+P4 cleanup), so without this declaration it would fall back to the
+     four-column base between 461-640px while holdings sits at one column. */
+  .holdings-summary-grid,
+  .strategy-summary-grid { grid-template-columns: 1fr; }
+  .holdings-summary-card,
+  .strategy-summary-card { border-right: 0; border-bottom: 1px solid var(--line); }
+  .holdings-summary-card:last-child,
+  .strategy-summary-card:last-child { border-bottom: 0; }
   .holdings-controls { grid-template-columns: 1fr 1fr; }
 }
 
@@ -2993,6 +2922,10 @@ input {
 }
 
 .dashboard {
+  /* Full-bleed shell. This late rule intentionally overrides every earlier
+     .dashboard block (those width/margin declarations are retired): the only
+     horizontal centering in the app is `.app-main > *` capping content at
+     1280px once the content column grows past it. */
   width: 100%;
   min-height: 100vh;
   margin: 0;
@@ -3034,24 +2967,6 @@ input {
   color: var(--text);
   background: var(--surface-3);
   border-color: var(--line-strong);
-}
-
-@media (max-width: 900px) {
-  .app-drawer,
-  .dashboard.drawer-collapsed .app-drawer {
-    width: min(280px, calc(100vw - 48px));
-    transform: translateX(-105%);
-  }
-
-  .dashboard.drawer-open .app-drawer { transform: translateX(0); }
-
-  .app-main,
-  .dashboard.drawer-collapsed .app-main {
-    margin-left: 0;
-    padding: 24px clamp(16px, 4vw, 32px) 28px;
-  }
-
-  .mobile-menu-button { display: grid; }
 }
 
 @media (max-width: 720px) {
@@ -3785,6 +3700,10 @@ footer {
   .broker-source-line,
   .trading-period-list,
   .trading-method,
+  .trading-chart-summary,
+  .trading-chart-legend,
+  .trading-chart-empty,
+  .cashflow-bridge,
   .holdings-controls,
   .holdings-result-count
 ) {
@@ -3835,23 +3754,98 @@ footer {
   .holdings-ledger-table .col-bucket { display: none; }
 }
 
+/* 1100px band — the four-column rails collapse to two. Geometry: the >900px
+   content column is 0.92 * media width - 236px, so at 1100px each of four
+   summary cells is ~195px and each metric cell ~323px — the accepted floors
+   (summary ~195px with ellipsis notes, metric cards 300px+). This band now
+   owns every four-to-two collapse that previously split across the retired
+   940px block and this one. Column follow-ups: metric-grid goes 1-column at
+   <=720px and the chart summary at <=460px; trading-stats intentionally has
+   NO narrower follow-up — it stays two-column down to the narrowest band,
+   matching its pre-cleanup behavior (the retired 940px block also never
+   single-columned it). */
 @media (max-width: 1100px) {
   .portfolio-overview-metric {
     padding-right: 20px;
     padding-left: 20px;
   }
 
-  .metric-grid {
+  .metric-grid,
+  .trading-stats,
+  .trading-chart-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .trading-chart-summary-period,
+  .trading-chart-summary-item {
+    padding: 10px 12px;
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .trading-chart-summary-period,
+  .trading-chart-summary-item:nth-child(2) { border-top: 0; }
+
+  .trading-chart-summary-period,
+  .trading-chart-summary-item:nth-child(3) { padding-left: 0; }
+
+  .trading-chart-summary-item:nth-child(even) {
+    border-left: 1px solid var(--line);
   }
 }
 
+/* Summary rails are two-column only between 640px and 1100px. The range
+   lower bound — instead of relying on a later <=640px override — keeps the
+   cascade order-independent: 640.0px falls to the single-column rule below,
+   640.5px matches this band, and no source-order knowledge is required.
+   Two-column border topology: even cards drop the right divider, the first
+   row keeps its bottom divider (the pre-P4 single-column model of "clear
+   all right borders" does not fit a 2x2 grid). */
+@media (640px < width) and (width <= 1100px) {
+  .holdings-summary-grid,
+  .strategy-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .holdings-summary-card:nth-child(even),
+  .strategy-summary-card:nth-child(even) { border-right: 0; }
+
+  .holdings-summary-card:nth-child(-n + 2),
+  .strategy-summary-card:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
+}
+
+/* Broker cards embed a 700px-floor table, so each card needs >=330px of
+   width before an extra column is worth its scrollbar: three cards require
+   3x330 + 2x24px gaps = 1038px of content column → media width ~1380;
+   two cards require 684px → ~1000px. Range syntax keeps the bands seamless
+   against both the 900px drawer boundary and each other. */
+@media (width <= 1000px) {
+  .strategy-broker-grid { grid-template-columns: 1fr; }
+}
+
+@media (1000px < width) and (width <= 1380px) {
+  .strategy-broker-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 900px band — the single drawer/shell block (three historical duplicates
+   merged here) plus the overview's two-across step. At <=900px the drawer is
+   off-canvas (app-main margin-left: 0) and horizontal padding is
+   clamp(18px, 5vw, 36px) per side (36px across most of the band), so the
+   content column is media width - 72px (649-828px across the band) and two
+   span-6 metrics get ~325-414px each — replacing the squeezed three-across
+   layout; <=720px stacks them fully. */
 @media (max-width: 900px) {
   .app-drawer,
   .dashboard.drawer-collapsed .app-drawer {
     width: min(304px, calc(100vw - 40px));
     padding: 20px 16px;
+    transform: translateX(-105%);
+    /* No box-shadow here on purpose: the historical block declared one, but
+       the precision-layer `.app-drawer { box-shadow: none }` always won the
+       cascade, so the shadow has never rendered and stays retired. */
   }
+
+  .dashboard.drawer-open .app-drawer { transform: translateX(0); }
 
   .app-main,
   .dashboard.drawer-collapsed .app-main {
@@ -3859,8 +3853,42 @@ footer {
     padding: 28px clamp(18px, 5vw, 36px) 44px;
   }
 
+  .mobile-menu-button { display: grid; }
+
   .dashboard-header h1 {
     font-size: clamp(32px, 8vw, 42px);
+  }
+
+  /* Collapsed-icon mode is desktop-only; restore labels at this band. */
+  .dashboard.drawer-collapsed .drawer-brand-copy,
+  .dashboard.drawer-collapsed .drawer-group-label,
+  .dashboard.drawer-collapsed .drawer-label,
+  .dashboard.drawer-collapsed .unlock-session-status,
+  .dashboard.drawer-collapsed .drawer-item .tab-count {
+    display: initial;
+  }
+
+  .dashboard.drawer-collapsed .unlock-session-status {
+    display: block;
+  }
+
+  .dashboard.drawer-collapsed .drawer-topline,
+  .dashboard.drawer-collapsed .currency-control {
+    flex-direction: row;
+  }
+
+  .dashboard.drawer-collapsed .drawer-item,
+  .dashboard.drawer-collapsed .drawer-utility {
+    justify-content: flex-start;
+    padding: 0 11px;
+  }
+
+  .portfolio-overview-metric {
+    grid-column: span 6;
+  }
+
+  .portfolio-overview-metric:nth-child(odd) {
+    border-left: 0;
   }
 }
 
@@ -3919,7 +3947,6 @@ footer {
 
   .metric-grid,
   .universe-grid,
-  .strategy-broker-grid,
   .strategy-bucket-grid {
     grid-template-columns: 1fr;
   }
@@ -3935,12 +3962,6 @@ footer {
 
   .risk-banner {
     padding: 18px;
-  }
-
-  .trading-chart-summary,
-  .holdings-summary-grid,
-  .strategy-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .trading-chart-summary-period,
@@ -4001,6 +4022,10 @@ footer {
   .holdings-controls {
     grid-template-columns: 1fr;
   }
+
+  /* The strategy border rules that used to live here were removed: the
+     <=640px block now carries the single-column border model for BOTH
+     summary rails, which already covers <=460px. */
 }
 
 @media (prefers-reduced-motion: reduce) {
