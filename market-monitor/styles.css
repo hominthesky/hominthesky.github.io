@@ -2827,10 +2827,15 @@ footer {
 .holdings-result-count { display: block; padding: 0 22px 10px; color: var(--muted); font-size: 12px; }
 .holdings-table-host { margin: 0 22px 22px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; }
 .holdings-table-host .table-wrap { border-top: 0; }
-.holdings-table-wrap table { min-width: 1060px; }
 .holdings-table-wrap th,
 .holdings-table-wrap td { padding: 12px 13px; }
-.holdings-ledger-table { min-width: 1420px !important; }
+/* Tier L (default, >1650px media width): full 13-column ledger on a compact
+   1240px floor. Content columns (0.92 * media width - 236px) reach 1240px
+   from ~1651px upward, so 1920px desktops render every column without the
+   old 1420px inner scroll. Narrower tiers override min-width and hide
+   columns near the other width bands at the end of this file; hidden
+   columns stay reachable through each row's detail disclosure. */
+.holdings-ledger-table { min-width: 1240px; }
 .holdings-ledger-table th:nth-child(-n + 4) { background: var(--surface-3); }
 .holdings-group-cell {
   border-right: 1px solid var(--line);
@@ -2838,6 +2843,49 @@ footer {
   font-weight: 750;
   vertical-align: middle;
 }
+.holdings-row-toggle {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-right: 8px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+  line-height: 1;
+  vertical-align: middle;
+}
+/* Hit area meets the 40px minimum control target (26 + 2x7) while the
+   visual glyph stays compact; focus styling still comes from the global
+   :focus-visible contract. */
+.holdings-row-toggle::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+}
+.holdings-row-toggle:hover {
+  color: var(--text);
+  background: var(--surface-3);
+}
+.holdings-detail-row > td {
+  background: var(--surface-2);
+}
+.holdings-detail {
+  padding: 12px 13px 14px;
+}
+.holdings-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 20px;
+  margin: 0;
+}
+.holdings-detail-item { display: grid; gap: 3px; min-width: 0; }
+.holdings-detail-item dt { color: var(--muted); font-size: 11px; font-weight: 750; }
+.holdings-detail-item dd { margin: 0; color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
 .holdings-allocation-comparison { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; }
 .holdings-status {
   display: inline-flex;
@@ -3756,6 +3804,35 @@ footer {
   .holdings-controls {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
+
+/* Holdings ledger tiered column sets (pair with LEDGER_COLUMNS in
+   app.js). Tier S (<=1180px, incl. <=900px mobile): the six key columns —
+   strategy, ticker, direction, market value, drift, source — on a 640px
+   floor, so 1024/1080px viewports (706/758px content columns) see every key
+   column without inner scroll. Tier M (1180-1650px): adds broker, instrument
+   type, quantity and actual allocation on a 1000px floor. Tier L is the base
+   rule above (all 13 columns, 1240px). Columns hidden by a tier stay
+   reachable through each row's keyboard-operated detail disclosure. Range
+   syntax mirrors the band above for seamless fractional-viewport edges. */
+@media (width <= 1180px) {
+  .holdings-ledger-table { min-width: 640px; }
+
+  .holdings-ledger-table .col-target,
+  .holdings-ledger-table .col-actual,
+  .holdings-ledger-table .col-broker,
+  .holdings-ledger-table .col-type,
+  .holdings-ledger-table .col-qty,
+  .holdings-ledger-table .col-nav,
+  .holdings-ledger-table .col-bucket { display: none; }
+}
+
+@media (1180px < width) and (width <= 1650px) {
+  .holdings-ledger-table { min-width: 1000px; }
+
+  .holdings-ledger-table .col-target,
+  .holdings-ledger-table .col-nav,
+  .holdings-ledger-table .col-bucket { display: none; }
 }
 
 @media (max-width: 1100px) {

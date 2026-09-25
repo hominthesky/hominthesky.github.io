@@ -3455,6 +3455,44 @@ function appendHoldingCell(row, value, { numeric = false, rowSpan = 1, className
   row.appendChild(cell);
 }
 
+// Single source for header labels, column classes and detail-field labels:
+// the header row, the per-cell classes and the detail disclosure all derive
+// from this descriptor, so a label reorder can never silently shift column
+// classes. `currency: true` marks the label that tracks the display currency.
+const LEDGER_COLUMNS = Object.freeze([
+  { label: "策略归属", className: "col-strategy" },
+  { label: "目标配比", className: "col-target" },
+  { label: "实际配比", className: "col-actual" },
+  { label: "漂移", className: "col-drift" },
+  { label: "券商", className: "col-broker" },
+  { label: "标的", className: "col-ticker" },
+  { label: "证券类型", className: "col-type" },
+  { label: "方向", className: "col-direction" },
+  { label: "持仓数", className: "col-qty" },
+  { label: "市值", className: "col-value", currency: true },
+  { label: "占组合 NAV", className: "col-nav" },
+  { label: "占三桶分母", className: "col-bucket" },
+  { label: "来源", className: "col-source" },
+]);
+
+const ledgerColumnLabel = (column) => (column.currency ? `${column.label} ${displayCurrency}` : column.label);
+
+// Detail rows are display:none until opened, so they never occupy table
+// layout rows; opening one inside a merged strategy group grows the group's
+// rowSpan so the four merged group cells keep covering the whole group.
+function syncLedgerGroupRowSpans(tbody) {
+  tbody.querySelectorAll("tr[data-ledger-group]").forEach((groupHead) => {
+    const base = Number(groupHead.dataset.ledgerRowSpan || "0");
+    if (base < 2) return;
+    const openCount = tbody.querySelectorAll(
+      `tr[data-ledger-detail-group="${groupHead.dataset.ledgerGroup}"]:not([hidden])`,
+    ).length;
+    groupHead.querySelectorAll("td.holdings-group-cell").forEach((cell) => {
+      cell.rowSpan = base + openCount;
+    });
+  });
+}
+
 function renderHoldingsTable(host, rows, allocation, countNode) {
   const visibleRows = filterHoldingRows(rows, holdingsFilters);
   countNode.textContent = `显示 ${visibleRows.length} / ${rows.length} 项`;
@@ -3473,49 +3511,117 @@ function renderHoldingsTable(host, rows, allocation, countNode) {
       (groupSizes.get(row.strategy_bucket) || 0) + 1,
     ));
   }
+  const [
+    strategyCol, targetCol, actualCol, driftCol, brokerCol, tickerCol,
+    typeCol, directionCol, qtyCol, valueCol, navCol, bucketCol, sourceCol,
+  ] = LEDGER_COLUMNS;
   const wrap = el("div", "table-wrap holdings-table-wrap");
   const tableNode = el("table", "holdings-ledger-table");
   const thead = el("thead");
   const headerRow = el("tr");
-  [
-    "策略归属", "目标配比", "实际配比", "漂移", "券商", "标的", "证券类型", "方向",
-    "持仓数", `市值 ${displayCurrency}`, "占组合 NAV", "占三桶分母", "来源",
-  ].forEach((label) => headerRow.appendChild(el("th", "", label)));
+  LEDGER_COLUMNS.forEach((column) => headerRow.appendChild(
+    el("th", column.className, ledgerColumnLabel(column)),
+  ));
   thead.appendChild(headerRow);
   const tbody = el("tbody");
   const emittedGroups = new Set();
-  visibleRows.forEach((row) => {
+  visibleRows.forEach((row, rowIndex) => {
+    const allocationRow = allocationByBucket.get(row.strategy_bucket);
+    const groupRowSpan = mergeStrategy ? groupSizes.get(row.strategy_bucket) : 1;
     const tr = el("tr");
     const firstInGroup = !mergeStrategy || !emittedGroups.has(row.strategy_bucket);
     if (firstInGroup) {
       emittedGroups.add(row.strategy_bucket);
-      const rowSpan = mergeStrategy ? groupSizes.get(row.strategy_bucket) : 1;
-      const allocationRow = allocationByBucket.get(row.strategy_bucket);
+      const rowSpan = groupRowSpan;
+      if (mergeStrategy) {
+        tr.dataset.ledgerGroup = row.strategy_bucket;
+        tr.dataset.ledgerRowSpan = String(rowSpan);
+      }
       appendHoldingCell(tr, holdingStrategyLabel(row.strategy_bucket), {
-        rowSpan, className: "holdings-group-cell",
+        rowSpan, className: `holdings-group-cell ${strategyCol.className}`,
       });
       appendHoldingCell(tr, allocationRow?.target_pct === null
         || allocationRow?.target_pct === undefined ? "—" : pct(allocationRow.target_pct), {
-        numeric: true, rowSpan, className: "holdings-group-cell",
+        numeric: true, rowSpan, className: `holdings-group-cell ${targetCol.className}`,
       });
       appendHoldingCell(tr, allocationRow?.actual_pct === null
         || allocationRow?.actual_pct === undefined ? "—" : pct(allocationRow.actual_pct), {
-        numeric: true, rowSpan, className: "holdings-group-cell",
+        numeric: true, rowSpan, className: `holdings-group-cell ${actualCol.className}`,
       });
       appendHoldingCell(tr, holdingDeviationNode(allocationRow?.gap_pct), {
-        numeric: true, rowSpan, className: "holdings-group-cell",
+        numeric: true, rowSpan, className: `holdings-group-cell ${driftCol.className}`,
       });
     }
-    appendHoldingCell(tr, row.broker);
-    appendHoldingCell(tr, row.ticker);
-    appendHoldingCell(tr, row.instrument_type === "OPTION" ? "期权" : row.instrument_type);
-    appendHoldingCell(tr, row.direction === "LONG" ? "多头" : "空头");
-    appendHoldingCell(tr, number(row.quantity, Math.abs(row.quantity % 1) > 0 ? 4 : 0), { numeric: true });
-    appendHoldingCell(tr, usd(row.market_value_usd), { numeric: true });
-    appendHoldingCell(tr, pct(row.pct_nav), { numeric: true });
-    appendHoldingCell(tr, row.pct_classified_long === null ? "—" : pct(row.pct_classified_long), { numeric: true });
-    appendHoldingCell(tr, holdingStatusNode(row.source_status));
+    appendHoldingCell(tr, row.broker, { className: "col-broker" });
+    const detailRow = el("tr", "holdings-detail-row");
+    detailRow.id = `holdings-detail-${rowIndex}`;
+    if (mergeStrategy) detailRow.dataset.ledgerDetailGroup = row.strategy_bucket;
+    detailRow.hidden = true;
+    const tickerCell = el("td", "col-ticker");
+    const toggle = el("button", "holdings-row-toggle", "▸");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-controls", detailRow.id);
+    toggle.setAttribute("aria-label", `展开 ${row.ticker} 明细`);
+    toggle.addEventListener("click", () => {
+      const open = detailRow.hidden;
+      detailRow.hidden = !open;
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.textContent = open ? "▾" : "▸";
+      toggle.setAttribute("aria-label", `${open ? "收起" : "展开"} ${row.ticker} 明细`);
+      syncLedgerGroupRowSpans(tbody);
+    });
+    append(tickerCell, toggle, el("span", "", row.ticker));
+    tr.appendChild(tickerCell);
+    appendHoldingCell(tr, row.instrument_type === "OPTION" ? "期权" : row.instrument_type, { className: "col-type" });
+    appendHoldingCell(tr, row.direction === "LONG" ? "多头" : "空头", { className: "col-direction" });
+    appendHoldingCell(tr, number(row.quantity, Math.abs(row.quantity % 1) > 0 ? 4 : 0), { numeric: true, className: "col-qty" });
+    appendHoldingCell(tr, usd(row.market_value_usd), { numeric: true, className: "col-value" });
+    appendHoldingCell(tr, pct(row.pct_nav), { numeric: true, className: "col-nav" });
+    appendHoldingCell(tr, row.pct_classified_long === null ? "—" : pct(row.pct_classified_long), { numeric: true, className: "col-bucket" });
+    appendHoldingCell(tr, holdingStatusNode(row.source_status), { className: "col-source" });
     tbody.appendChild(tr);
+
+    const detailCell = el("td", "holdings-detail");
+    // Merged multi-row groups span their four group cells across every layout
+    // row of the group, including this detail row, so the detail cell covers
+    // the remaining nine logical columns; single-row groups and non-merged
+    // layouts leave all thirteen free. Render-time constant: display:none
+    // detail rows take no layout rows. colSpan is always counted on the
+    // 13-column logical grid — display:none cells produce no boxes, and
+    // browser clamping is NOT relied on as a safety net.
+    detailCell.colSpan = mergeStrategy && groupRowSpan >= 2 ? 9 : 13;
+    const detailGrid = el("dl", "holdings-detail-grid");
+    // Explicit [column, value] pairs — never a bare-index zip — so a value
+    // can only sit next to its own column descriptor.
+    const detailItems = [
+      [strategyCol, holdingStrategyLabel(row.strategy_bucket)],
+      [targetCol, allocationRow?.target_pct === null
+        || allocationRow?.target_pct === undefined ? "—" : pct(allocationRow.target_pct)],
+      [actualCol, allocationRow?.actual_pct === null
+        || allocationRow?.actual_pct === undefined ? "—" : pct(allocationRow.actual_pct)],
+      [driftCol, holdingDeviationNode(allocationRow?.gap_pct)],
+      [brokerCol, row.broker],
+      [tickerCol, row.ticker],
+      [typeCol, row.instrument_type === "OPTION" ? "期权" : row.instrument_type],
+      [directionCol, row.direction === "LONG" ? "多头" : "空头"],
+      [qtyCol, number(row.quantity, Math.abs(row.quantity % 1) > 0 ? 4 : 0)],
+      [valueCol, usd(row.market_value_usd)],
+      [navCol, pct(row.pct_nav)],
+      [bucketCol, row.pct_classified_long === null ? "—" : pct(row.pct_classified_long)],
+      [sourceCol, holdingStatusNode(row.source_status)],
+    ];
+    detailItems.forEach(([column, value]) => {
+      const item = el("div", "holdings-detail-item");
+      const dd = el("dd");
+      if (value instanceof Node) dd.appendChild(value);
+      else dd.textContent = value;
+      append(item, el("dt", "", ledgerColumnLabel(column)), dd);
+      detailGrid.appendChild(item);
+    });
+    detailCell.appendChild(detailGrid);
+    detailRow.appendChild(detailCell);
+    tbody.appendChild(detailRow);
   });
   append(tableNode, thead, tbody);
   wrap.appendChild(tableNode);
