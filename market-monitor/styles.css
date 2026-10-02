@@ -120,7 +120,11 @@ input {
   border-right: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 96%, transparent);
   backdrop-filter: blur(20px);
-  transition: width 180ms ease, transform 180ms ease;
+  /* `visibility` rides the transition with a delay equal to the slide
+     duration: the closing slide-out stays painted, then the off-canvas
+     drawer flips hidden, dropping its buttons from the tab order. The
+     <=900px open rule zeroes the delay so slide-in paints from frame one. */
+  transition: width 180ms ease, transform 180ms ease, visibility 0s linear 180ms;
 }
 
 .drawer-topline,
@@ -298,11 +302,9 @@ input {
   transition: margin-left 180ms ease;
 }
 
-.app-main > * {
-  width: min(100%, 1440px);
-  margin-right: auto;
-  margin-left: auto;
-}
+/* The child rail rule that lived here (1440px cap + auto side margins)
+   moved wholesale into the 2026 precision layer: single owner now supplies
+   both the cap and the centering. */
 
 .dashboard-header {
   align-items: center;
@@ -1476,7 +1478,9 @@ input:focus {
 .live-preference-control { display: grid; grid-template-columns: 1fr auto; align-items: center; }
 .live-preference-control input {
   min-width: 0;
-  height: 38px;
+  /* 44px matches the global control minimum so the input never out-grows
+     its joined suffix chip. */
+  height: 44px;
   padding: 0 10px;
   border-radius: 6px 0 0 6px;
   font-size: 12px;
@@ -1485,7 +1489,8 @@ input:focus {
   display: grid;
   place-items: center;
   min-width: 48px;
-  height: 38px;
+  /* Same 44px as the input: one flush joined control, no step. */
+  height: 44px;
   border: 1px solid var(--line-strong);
   border-left: 0;
   border-radius: 0 6px 6px 0;
@@ -2228,7 +2233,10 @@ input:focus {
 }
 
 .fact-stack b {
-  color: #bac8da;
+  /* Theme token, not the retired dark-era pale-blue hex label color that
+     measured ~1.7:1 on light cards; --text-secondary holds >=4.5:1 in
+     both themes. */
+  color: var(--text-secondary);
 }
 
 .table-wrap {
@@ -3017,6 +3025,8 @@ input {
   --space-6: 32px;
   --space-7: 48px;
   --space-8: 64px;
+  /* Content rail cap shared by every in-flow direct child of .app-main. */
+  --rail-max: 1280px;
 }
 
 [data-theme="light"] {
@@ -3235,8 +3245,19 @@ select {
   padding: var(--space-7) clamp(var(--space-6), 4vw, var(--space-8)) var(--space-8);
 }
 
+/* Single-owner capped centered rail: every in-flow direct child of
+   .app-main (header, asof strip, overview, view panels, footer) resolves
+   both its width cap and its horizontal centering here, and nowhere else.
+   The retired architecture split ownership — a base rule supplied the
+   auto side margins while this rule supplied only the width cap — so any
+   later child-level margin shorthand reset the autos; at content widths
+   beyond the cap the header and view panels stayed centered while the
+   .asof-line strip and .portfolio-overview anchored left. Children now
+   declare block-direction margins only; the static rail contract test
+   enforces both halves of the invariant. */
 .app-main > * {
-  width: min(100%, 1280px);
+  width: min(100%, var(--rail-max));
+  margin-inline: auto;
 }
 
 .dashboard.drawer-collapsed .app-drawer {
@@ -3273,7 +3294,7 @@ select {
 
 .asof-line {
   gap: 7px 18px;
-  margin: 18px 0 34px;
+  margin-block: 18px 34px;
   padding: 15px 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -3302,7 +3323,7 @@ select {
 }
 
 .portfolio-overview {
-  margin: 0 0 48px;
+  margin-bottom: 48px;
   overflow: visible;
   border: 0;
   border-top: 1px solid var(--line);
@@ -3612,8 +3633,17 @@ tbody tr:hover td {
   border-radius: var(--radius-md);
 }
 
-.strategy-trend-controls {
-  margin-top: -50px;
+/* Desktop-only optical lift: the cadence row rides up beside the section
+   head, right-aligned into empty space. Range syntax (not min-width:
+   901px) keeps the seam with max-width: 900px gapless at fractional
+   viewports — same convention as the holdings rail band. Scoped so the
+   <=900px band's non-overlap margin stays authoritative; an unconditional
+   version here would override it and drop left-aligned controls onto the
+   section copy across 721-900px. */
+@media (900px < width) {
+  .strategy-trend-controls {
+    margin-top: -50px;
+  }
 }
 
 .strategy-series-toggle[aria-pressed="true"],
@@ -3840,12 +3870,20 @@ footer {
     width: min(304px, calc(100vw - 40px));
     padding: 20px 16px;
     transform: translateX(-105%);
+    /* Off-canvas must also be unfocusable: transform alone kept the nav
+       buttons tabbable with focus visually lost. visibility (not display)
+       keeps the slide animation paintable via the base transition. */
+    visibility: hidden;
     /* No box-shadow here on purpose: the historical block declared one, but
        the precision-layer `.app-drawer { box-shadow: none }` always won the
        cascade, so the shadow has never rendered and stays retired. */
   }
 
-  .dashboard.drawer-open .app-drawer { transform: translateX(0); }
+  .dashboard.drawer-open .app-drawer {
+    transform: translateX(0);
+    visibility: visible;
+    transition: width 180ms ease, transform 180ms ease, visibility 0s linear 0s;
+  }
 
   .app-main,
   .dashboard.drawer-collapsed .app-main {

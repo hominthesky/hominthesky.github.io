@@ -3983,6 +3983,15 @@ function applyThemePreference(preference) {
   byId("theme-button").title = `当前：${labels[selected]}；点击切换`;
 }
 
+function readStoredThemePreference() {
+  try {
+    const stored = localStorage.getItem("zzao-monitor-theme");
+    return ["system", "light", "dark"].includes(stored) ? stored : "";
+  } catch (error) {
+    return "";
+  }
+}
+
 function cycleTheme() {
   const current = document.documentElement.dataset.themePreference || "system";
   const order = ["system", "light", "dark"];
@@ -4196,7 +4205,7 @@ document.querySelectorAll(".currency-option").forEach((button) => {
 });
 
 byId("theme-button").addEventListener("click", cycleTheme);
-applyThemePreference(document.documentElement.dataset.themePreference || "system");
+applyThemePreference(readStoredThemePreference() || "system");
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   if (document.documentElement.dataset.themePreference === "system") {
     applyThemePreference("system");
