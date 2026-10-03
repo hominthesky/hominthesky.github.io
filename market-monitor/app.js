@@ -28,7 +28,7 @@ import {
   updateLastConfirmedPortfolioOverview,
   yearSeriesScope,
   yearCoverageLabel,
-} from "./live_trading.mjs?v=20260903-1";
+} from "./live_trading.mjs?v=20261003-1";
 import {
   dashboardStatusForView,
   effectiveHoldingsStatus,
@@ -177,7 +177,7 @@ const TERM_DEFINITIONS = {
   livingExpenseCashflow:
     "现金流创造加上账户实际入账的利息净额。用于评估生活开支覆盖，但不等于券商安全可提现金额；实际提现还受结算现金、保证金安全垫和税务准备金约束。",
   portfolioNav:
-    "所有已接入券商账户净清算价值的同步合计，包含现金、持仓市值和账户负债。任一预期账户缺失、过期或不同步时不显示确定金额。",
+    "所有已接入券商账户净清算价值的合计。当前批次完整且新鲜时显示当前合计；任一券商本轮不可用但存在最近一次成功采集值时，回退显示该券商历史值并逐券商标注截至时间与年龄，合计标记“含陈旧数据 · 混合时间点”，不代表同一估值时点；任一预期券商既无当前值也无历史值时不显示确定金额，不补零。该展示值仅供观察，不进入风险闸门、收益历史或交易建议。",
   portfolioTotalReturn:
     "跨券商组合净资产变化剔除外部入金和出金后的链式总回报；股息、融资利息、交易费用以及已实现和未实现盈亏均通过净资产自然体现一次。年化值按 ACT/365 折算，不是未来收益预测。",
 };
@@ -591,11 +591,19 @@ function overviewMetric(label, value, note, options = {}) {
     ? term(label, options.definition, "portfolio-overview-label")
     : el("span", "portfolio-overview-label", label);
   const valueNode = el("strong", `portfolio-overview-value ${options.tone || ""}`.trim(), value);
-  append(item, labelNode, valueNode, el("span", "portfolio-overview-note", note));
+  if (options.valueAria) valueNode.setAttribute("aria-label", options.valueAria);
+  append(
+    item,
+    labelNode,
+    valueNode,
+    el("span", `portfolio-overview-note ${options.noteClass || ""}`.trim(), note),
+  );
   if (Array.isArray(options.details) && options.details.length) {
     const details = el("div", "portfolio-overview-details");
-    options.details.forEach(({ label: detailLabel, value: detailValue, note: detailNote }) => {
+    options.details.forEach(({ label: detailLabel, value: detailValue, note: detailNote, origin: detailOrigin, tier: detailTier }) => {
       const row = el("div", "portfolio-overview-detail");
+      if (detailOrigin) row.dataset.origin = detailOrigin;
+      if (detailTier) row.dataset.tier = detailTier;
       append(
         row,
         el("span", "portfolio-overview-detail-label", detailLabel),
@@ -607,6 +615,52 @@ function overviewMetric(label, value, note, options = {}) {
     item.append(details);
   }
   return item;
+}
+
+// Current-batch collector status phrasing. These labels state only what the
+// current collection round proved; an owner-online transient collector
+// failure must read as "this round failed", never as "broker disconnected".
+const BROKER_CURRENT_STATUS_LABELS = Object.freeze({
+  OK: "实时",
+  EXPECTED_LAG: "日结待更新",
+  PARTIAL: "本轮部分取得",
+  STALE: "本轮数据过期",
+  MISSING: "本轮未取得",
+  FAILED: "本轮采集失败",
+});
+
+function brokerCurrentStatusLabel(sourceStatus) {
+  const status = String(sourceStatus || "MISSING").toUpperCase();
+  return BROKER_CURRENT_STATUS_LABELS[status] || `来源 ${status}`;
+}
+
+// Age text differs per tier so staleness is never color-only. Tiers follow
+// the presentation contract: <10 min delayed, 10–30 min warning, >=30 min
+// severely stale (display escalation only; no notification thresholds).
+function lastKnownGoodAgeLabel(display) {
+  if (!display || display.age_ms === null || display.age_ms === undefined) return "";
+  const minutes = Math.max(0, Math.round(Number(display.age_ms) / 60_000));
+  if (display.age_tier === "SEVERE") return `严重陈旧 ${minutes} 分钟`;
+  if (display.age_tier === "WARN") return `延迟 ${minutes} 分钟 · 陈旧警示`;
+  return `延迟 ${minutes} 分钟`;
+}
+
+function brokerDisplayNote(row) {
+  const display = row?.display;
+  if (!display) return "暂无可用数据";
+  if (display.origin === "CURRENT") {
+    return `实时 · ${liveTime(display.source_retrieved_at)}`;
+  }
+  if (display.origin === "LKG") {
+    return `显示历史数据 · 截至 ${liveTime(display.source_retrieved_at)}`
+      + ` · ${lastKnownGoodAgeLabel(display) || "数据年龄未知"}`
+      + ` · 当前状态：${brokerCurrentStatusLabel(display.current_source_status)}`;
+  }
+  return `当前状态：${brokerCurrentStatusLabel(display.current_source_status)} · 暂无可用数据`;
+}
+
+function brokerDisplayTier(display) {
+  return display?.origin === "LKG" ? String(display.age_tier || "DELAYED").toLowerCase() : null;
 }
 
 function renderPortfolioOverview() {
@@ -628,8 +682,44 @@ function renderPortfolioOverview() {
   const orderedBrokers = ["Futu", "Tiger", "IBKR"]
     .map((broker) => brokerByName.get(broker)).filter(Boolean);
   const currentComplete = summary.source_status === "OK";
-  const missingBrokerLabel = summary.missing_brokers.length
+  const displaySummary = summary.display_summary || {};
+  const displayMode = displaySummary.mode || "INCOMPLETE";
+  const mixedDisplay = displayMode === "MIXED_LKG" && displaySummary.mixed_timepoints === true;
+  const missingBrokerLabel = summary.current_missing_brokers.length
+    ? summary.current_missing_brokers.join("/") : "部分券商";
+  const noDisplayBrokerLabel = summary.missing_brokers.length
     ? summary.missing_brokers.join("/") : "部分券商";
+  const oldestLkgTime = displaySummary.oldest_lkg_as_of
+    ? liveTime(displaySummary.oldest_lkg_as_of) : "";
+  const mixedFlagNote = "含陈旧数据 · 混合时间点";
+  const navNote = currentComplete
+    ? `当前完整批次 · ${liveTime(summary.source_retrieved_at)}`
+    : mixedDisplay
+      ? `${mixedFlagNote} · 最早历史值截至 ${oldestLkgTime}`
+      : displayMode === "MIXED_LKG"
+        ? `合计按逐券商可显示值计算 · ${liveTime(summary.source_retrieved_at)}`
+        : summary.missing_brokers.length
+          ? `当前批次缺 ${missingBrokerLabel}，${noDisplayBrokerLabel === missingBrokerLabel ? "" : `${noDisplayBrokerLabel} `}暂无可用数据，合计不计算${summary.source_retrieved_at ? ` · ${liveTime(summary.source_retrieved_at)}` : ""}`
+          : summary.source_retrieved_at
+            ? `当前批次缺 ${missingBrokerLabel}，合计不计算 · ${liveTime(summary.source_retrieved_at)}`
+            : "当前券商批次不可确认";
+  const navValueAria = mixedDisplay
+    ? `${usd(summary.derived_nav_usd, true)}（${mixedFlagNote}，最早历史值截至 ${oldestLkgTime}，非当前完整批次）`
+    : null;
+  const leverageNote = currentComplete && isFiniteMetric(summary.gross_leverage_red)
+    ? `当前完整批次 · 治理红线 ${number(summary.gross_leverage_red, 2)}x`
+    : mixedDisplay
+      ? `${mixedFlagNote} · 治理红线 ${number(summary.gross_leverage_red, 2)}x`
+      : displayMode === "MIXED_LKG"
+        ? `合计按逐券商可显示值计算 · 治理红线 ${number(summary.gross_leverage_red, 2)}x`
+        : summary.source_retrieved_at
+          ? `当前批次缺 ${missingBrokerLabel}，组合杠杆不计算`
+          : "当前覆盖不足不估算";
+  const staleFlagClass = mixedDisplay
+    ? displaySummary.worst_age_tier === "SEVERE"
+      ? "portfolio-overview-flag portfolio-overview-flag-severe"
+      : "portfolio-overview-flag"
+    : "";
   const historicalNavDetail = !currentComplete && lastConfirmed
     ? [{
       label: "上次完整三券商",
@@ -695,20 +785,23 @@ function renderPortfolioOverview() {
   append(
     grid,
     overviewMetric(
-      "跨券商当前总净资产",
+      // A mixed-timepoint total must never be titled as a current value:
+      // the label itself, the flagged note and the value's aria-label all
+      // state that the number mixes current and historical broker values.
+      mixedDisplay ? "跨券商展示总净资产" : "跨券商当前总净资产",
       usd(summary.derived_nav_usd, true),
-      currentComplete
-        ? `当前完整批次 · ${liveTime(summary.source_retrieved_at)}`
-        : summary.source_retrieved_at
-          ? `当前批次缺 ${missingBrokerLabel}，三券商总额不计算 · ${liveTime(summary.source_retrieved_at)}`
-          : "当前三券商批次不可确认",
+      navNote,
       {
         definition: TERM_DEFINITIONS.portfolioNav,
+        noteClass: staleFlagClass,
+        valueAria: navValueAria,
         details: [
           ...orderedBrokers.map((row) => ({
             label: row.broker,
-            value: usd(row.derived_nav_usd, true),
-            note: row.source_status === "OK" ? "当前批次" : `当前来源 ${row.source_status}`,
+            value: usd(row.display?.derived_nav_usd, true),
+            note: brokerDisplayNote(row),
+            origin: row.display?.origin === "LKG" ? "lkg" : row.display?.origin === "CURRENT" ? "current" : "none",
+            tier: brokerDisplayTier(row.display),
           })),
           ...historicalNavDetail,
         ],
@@ -837,13 +930,10 @@ function renderPortfolioOverview() {
       isFiniteMetric(summary.gross_leverage)
         ? `${number(summary.gross_leverage, 2)}x`
         : "—",
-      currentComplete && isFiniteMetric(summary.gross_leverage_red)
-        ? `当前完整批次 · 治理红线 ${number(summary.gross_leverage_red, 2)}x`
-        : summary.source_retrieved_at
-          ? `当前批次缺 ${missingBrokerLabel}，组合杠杆不计算`
-          : "当前覆盖不足不估算",
+      leverageNote,
       {
         definition: TERM_DEFINITIONS.grossLeverage,
+        noteClass: staleFlagClass,
         tone:
           isFiniteMetric(summary.gross_leverage) &&
           isFiniteMetric(summary.gross_leverage_red) &&
@@ -853,8 +943,10 @@ function renderPortfolioOverview() {
         details: [
           ...orderedBrokers.map((row) => ({
             label: row.broker,
-            value: isFiniteMetric(row.gross_leverage) ? `${number(row.gross_leverage, 2)}x` : "—",
-            note: row.source_status === "OK" ? "当前批次" : `当前来源 ${row.source_status}`,
+            value: isFiniteMetric(row.display?.gross_leverage) ? `${number(row.display.gross_leverage, 2)}x` : "—",
+            note: brokerDisplayNote(row),
+            origin: row.display?.origin === "LKG" ? "lkg" : row.display?.origin === "CURRENT" ? "current" : "none",
+            tier: brokerDisplayTier(row.display),
           })),
           ...historicalLeverageDetail,
         ],
@@ -3819,18 +3911,39 @@ function renderStrategy() {
   const brokerSection = section("逐券商策略复盘", "Futu、Tiger 与 IBKR 独立列示；IBKR 当前只有原生 TWR，不把缺失的 MWR 或盈亏补成零。 ");
   const brokerGrid = el("div", "strategy-broker-grid");
   const brokerNotes = [];
-  const strategyCurrentSummary = currentPortfolioDisplaySummary(portfolioCurrentSummary);
-  const currentBrokers = Array.isArray(strategyCurrentSummary?.broker_breakdown)
-    ? strategyCurrentSummary.broker_breakdown : [];
+  // One presentation call: portfolioOverviewPresentation sanitizes the
+  // stored summary internally, so no separate currentPortfolioDisplaySummary
+  // pass is needed here. Rows carry both the current status and the display
+  // resolution.
+  const strategyPresentation = portfolioOverviewPresentation(portfolioCurrentSummary, null);
+  const strategyDisplayByBroker = new Map(
+    (Array.isArray(strategyPresentation.broker_breakdown)
+      ? strategyPresentation.broker_breakdown
+      : []).map((row) => [row.broker, row]),
+  );
+  const currentBrokers = Array.isArray(strategyPresentation.broker_breakdown)
+    ? strategyPresentation.broker_breakdown : [];
   for (const broker of ["Futu", "Tiger", "IBKR"]) {
     const rows = annual.filter((row) => row.broker === broker).sort((a, b) => b.year - a.year)
       .map((row) => ({ ...row, pnl_display: strategyOriginalPnl(row) }));
     const current = currentBrokers.find((row) => row?.broker === broker);
+    const brokerDisplay = strategyDisplayByBroker.get(broker)?.display || null;
+    const brokerHeadNote = `净资产 ${usd(brokerDisplay?.derived_nav_usd, true)}`
+      + ` · 毛杠杆 ${isFiniteMetric(brokerDisplay?.gross_leverage) ? `${number(brokerDisplay.gross_leverage, 2)}x` : "—"}`
+      + (brokerDisplay?.origin === "LKG"
+        ? ` · 显示历史数据（${lastKnownGoodAgeLabel(brokerDisplay) || "数据年龄未知"}）`
+        : "")
+      + ` · ${brokerCurrentStatusLabel(brokerDisplay?.current_source_status || current?.source_status)}`
+      + (brokerDisplay?.source_retrieved_at
+        ? ` · 值截至 ${liveTime(brokerDisplay.source_retrieved_at)}`
+        : strategyPresentation.source_retrieved_at
+          ? ` · 批次 ${liveTime(strategyPresentation.source_retrieved_at)}`
+          : "");
     const card = el("article", "strategy-broker-card");
     const brokerHead = el("div", "strategy-broker-head");
     append(brokerHead,
       el("h3", "", broker),
-      el("span", "", `净资产 ${usd(current?.derived_nav_usd, true)} · 毛杠杆 ${isFiniteMetric(current?.gross_leverage) ? `${number(current.gross_leverage, 2)}x` : "—"} · ${current?.source_status || strategyCurrentSummary?.source_status || "MISSING"}${strategyCurrentSummary?.source_retrieved_at ? ` · ${liveTime(strategyCurrentSummary.source_retrieved_at)}` : ""}`),
+      el("span", "", brokerHeadNote),
     );
     card.appendChild(brokerHead);
     card.appendChild(table([

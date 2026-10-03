@@ -428,6 +428,46 @@ input {
 .portfolio-overview-detail-value { font-size: 13px; color: var(--ink); }
 .portfolio-overview-detail-note { overflow-wrap: anywhere; }
 
+/* Last Known Good display provenance (CR-20261003-01). The mixed-timepoint
+   flag is state-critical: it must wrap instead of ellipsizing on narrow
+   screens, and its tiers are labeled in text — color only reinforces. */
+.portfolio-overview-note.portfolio-overview-flag {
+  justify-self: start;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--amber);
+  border-radius: 6px;
+  color: var(--amber);
+  background: var(--amber-soft);
+  font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+.portfolio-overview-note.portfolio-overview-flag-severe {
+  border-color: var(--red);
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.portfolio-overview-detail[data-origin="lkg"] .portfolio-overview-detail-value {
+  padding-left: 7px;
+  border-left: 2px solid var(--amber);
+}
+
+.portfolio-overview-detail[data-origin="lkg"][data-tier="warn"] .portfolio-overview-detail-note {
+  color: var(--amber);
+}
+
+.portfolio-overview-detail[data-origin="lkg"][data-tier="severe"] .portfolio-overview-detail-value {
+  border-left-color: var(--red);
+}
+
+.portfolio-overview-detail[data-origin="lkg"][data-tier="severe"] .portfolio-overview-detail-note {
+  color: var(--red);
+}
+
 .fx-line {
   color: var(--cyan);
 }

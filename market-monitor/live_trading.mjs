@@ -4,6 +4,12 @@ export const MANUAL_REFRESH_TIMEOUT_MS = 30_000;
 export const DEFAULT_MONTHLY_TARGET_CNY = 40_000;
 export const PORTFOLIO_GATE_STALE_AFTER_MS = 10 * 60_000;
 export const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60_000;
+// Display-only escalation for per-broker Last Known Good fallback values.
+// The warn tier reuses the existing 10-minute freshness contract; anything
+// fresher than that is merely "delayed". These are presentation tiers and
+// never add or change notification thresholds.
+export const LKG_STALE_WARN_AFTER_MS = 10 * 60_000;
+export const LKG_STALE_SEVERE_AFTER_MS = 30 * 60_000;
 export const LIVING_EXPENSE_COVERAGE_CONTRACT_ID = "living_expense_coverage_v2";
 export const LIVING_EXPENSE_COVERAGE_FORMULA =
   "max(living_expense_net_cashflow_usd * usd_cny_rate, 0) / living_expense_target_cny";
@@ -952,10 +958,40 @@ function safeNativeBrokerReturn(value, broker) {
   };
 }
 
-function confirmedPortfolioOverviewCandidate(value) {
+// Live current-batch expected-broker contract: Futu and Tiger are always
+// expected; IBKR joins only when enabled. Two or three unique allowlisted
+// brokers, always containing both mandatory names.
+function validLiveExpectedBrokers(expectedBrokers) {
+  return Array.isArray(expectedBrokers)
+    && expectedBrokers.length >= DEFAULT_EXPECTED_LIVE_BROKERS.length
+    && expectedBrokers.length <= ALLOWED_LIVE_BROKERS.size
+    && new Set(expectedBrokers).size === expectedBrokers.length
+    && expectedBrokers.every((broker) => ALLOWED_LIVE_BROKERS.has(broker))
+    && DEFAULT_EXPECTED_LIVE_BROKERS.every((broker) => expectedBrokers.includes(broker));
+}
+
+// Postclose daily-history contract stays strictly three-broker: the
+// "上次完整三券商" reference must never accept a two-broker snapshot, even
+// though the live current batch may legitimately be Futu/Tiger only.
+function validPostcloseExpectedBrokers(expectedBrokers) {
+  return Array.isArray(expectedBrokers)
+    && expectedBrokers.length === ALLOWED_LIVE_BROKERS.size
+    && new Set(expectedBrokers).size === expectedBrokers.length
+    && expectedBrokers.every((broker) => ALLOWED_LIVE_BROKERS.has(broker));
+}
+
+function confirmedPortfolioOverviewCandidate(value, options = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   if (value.confirmation_kind != null
     && value.confirmation_kind !== "POSTCLOSE_HISTORY") return null;
+  // The expected-broker contract is semantic: a POSTCLOSE_HISTORY value is
+  // always held to the strict three-broker daily-history contract (the
+  // explicit option just makes the historical caller's intent readable),
+  // while a live current complete batch accepts Futu/Tiger with optional
+  // IBKR. Without this split, a legitimate two-broker fresh OK batch could
+  // never recover from FAILED+LKG to CURRENT_COMPLETE.
+  const postcloseHistory = options.postcloseHistory === true
+    || value.confirmation_kind === "POSTCLOSE_HISTORY";
   if (String(value.source_status || "").toUpperCase() !== HEALTHY) return null;
   const nav = value.derived_nav_usd;
   const gross = value.gross_market_value_usd;
@@ -971,10 +1007,11 @@ function confirmedPortfolioOverviewCandidate(value) {
   }
   const breakdown = Array.isArray(value.broker_breakdown) ? value.broker_breakdown : [];
   const expectedBrokers = Array.isArray(value.expected_brokers) ? value.expected_brokers : [];
-  if (expectedBrokers.length !== 3 || breakdown.length !== 3
-    || expectedBrokers.length !== breakdown.length
-    || new Set(expectedBrokers).size !== expectedBrokers.length
-    || !expectedBrokers.every((broker) => ["Futu", "Tiger", "IBKR"].includes(broker))) return null;
+  const expectedValid = postcloseHistory
+    ? validPostcloseExpectedBrokers(expectedBrokers)
+    : validLiveExpectedBrokers(expectedBrokers);
+  if (!expectedValid
+    || expectedBrokers.length !== breakdown.length) return null;
   const seen = new Set();
   const safeBreakdown = breakdown.map((row) => {
     const broker = String(row?.broker || "");
@@ -1026,14 +1063,58 @@ function confirmedPortfolioOverviewCandidate(value) {
 
 function confirmedHistoricalPortfolioOverviewCandidate(value) {
   if (value?.confirmation_kind !== "POSTCLOSE_HISTORY") return null;
-  return confirmedPortfolioOverviewCandidate(value);
+  return confirmedPortfolioOverviewCandidate(value, { postcloseHistory: true });
+}
+
+// Validates the optional backend `broker_last_known_good` array: one entry
+// per broker holding the most recent strictly-OK collection. Every field is
+// re-validated fail-closed (identity, domain, timestamp, future skew) so a
+// poisoned payload can never inject a display value. Invalid or duplicate
+// entries are dropped, never zero-filled.
+function safeBrokerLastKnownGood(value, nowMs = Date.now()) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const rows = [];
+  for (const entry of value) {
+    const broker = String(entry?.broker || "");
+    if (!ALLOWED_LIVE_BROKERS.has(broker) || seen.has(broker)) continue;
+    const nav = nativeFiniteNumber(entry?.derived_nav_usd);
+    const gross = nativeFiniteNumber(entry?.gross_market_value_usd);
+    const leverage = nativeFiniteNumber(entry?.gross_leverage);
+    const retrievedAt = timestamp(entry?.source_retrieved_at);
+    if (nav === null || nav <= 0
+      || gross === null || gross < 0
+      || leverage === null || leverage < 0
+      || Math.abs(leverage - gross / nav) >= 0.0001
+      || retrievedAt === null
+      || retrievedAt > Number(nowMs) + MAX_FUTURE_CLOCK_SKEW_MS) continue;
+    seen.add(broker);
+    rows.push({
+      broker,
+      derived_nav_usd: nav,
+      gross_market_value_usd: gross,
+      gross_leverage: leverage,
+      source_retrieved_at: entry.source_retrieved_at,
+    });
+  }
+  return rows;
+}
+
+export function lastKnownGoodAgeTier(ageMs) {
+  if (ageMs === null || ageMs === undefined) return null;
+  const age = Number(ageMs);
+  if (!Number.isFinite(age) || age < 0) return null;
+  if (age >= LKG_STALE_SEVERE_AFTER_MS) return "SEVERE";
+  if (age >= LKG_STALE_WARN_AFTER_MS) return "WARN";
+  return "DELAYED";
 }
 
 function unavailableCurrentPortfolioSummary(value, sourceStatus) {
-  const expectedBrokers = Array.isArray(value?.expected_brokers)
-    && value.expected_brokers.length === 3
-    && new Set(value.expected_brokers).size === value.expected_brokers.length
-    && value.expected_brokers.every((broker) => ALLOWED_LIVE_BROKERS.has(broker))
+  // Failure-state wrapper keeps the legitimate expected-broker contract
+  // (Futu and Tiger always expected; IBKR only when enabled): a two-broker
+  // batch must keep its rows so per-broker LKG fallback still applies.
+  // Forcing length === 3 here would wipe Futu/Tiger batches to no rows.
+  const expectedBrokers = validLiveExpectedBrokers(value?.expected_brokers)
     ? [...value.expected_brokers] : [];
   return {
     source_status: sourceStatus,
@@ -1134,23 +1215,79 @@ function sanitizeCurrentPortfolioSummary(value) {
 export function currentPortfolioDisplaySummary(value, nowMs = Date.now()) {
   const current = sanitizeCurrentPortfolioSummary(value);
   if (!current) return null;
+  // LKG rides along the display summary in every state (including the
+  // stale/missing downgrades below) so the overview can fall back per
+  // broker. It never enters currentPortfolioReturnReferenceSummary.
+  const lastKnownGood = safeBrokerLastKnownGood(value?.broker_last_known_good, nowMs);
   const retrievedAt = timestamp(current.source_retrieved_at);
   if (retrievedAt !== null && retrievedAt > Number(nowMs) + MAX_FUTURE_CLOCK_SKEW_MS) {
     return {
       ...unavailableCurrentPortfolioSummary(current, "MISSING"),
       source_retrieved_at: null,
+      broker_last_known_good: lastKnownGood,
     };
   }
-  if (current.source_status !== HEALTHY && current.source_status !== "PARTIAL") return current;
-  if (retrievedAt === null) return unavailableCurrentPortfolioSummary(current, "MISSING");
-  if (Number(nowMs) - retrievedAt > PORTFOLIO_GATE_STALE_AFTER_MS) {
-    return unavailableCurrentPortfolioSummary(current, "STALE");
+  if (current.source_status !== HEALTHY && current.source_status !== "PARTIAL") {
+    return { ...current, broker_last_known_good: lastKnownGood };
   }
-  return current;
+  if (retrievedAt === null) {
+    return {
+      ...unavailableCurrentPortfolioSummary(current, "MISSING"),
+      broker_last_known_good: lastKnownGood,
+    };
+  }
+  if (Number(nowMs) - retrievedAt > PORTFOLIO_GATE_STALE_AFTER_MS) {
+    return {
+      ...unavailableCurrentPortfolioSummary(current, "STALE"),
+      broker_last_known_good: lastKnownGood,
+    };
+  }
+  return { ...current, broker_last_known_good: lastKnownGood };
 }
 
 export function currentPortfolioReturnReferenceSummary(value) {
   return sanitizeCurrentPortfolioSummary(value);
+}
+
+function brokerDisplayResolution(row, lkgByName, nowMs) {
+  // Within a displayable summary an OK broker row has already passed the
+  // shared 10-minute freshness gate, so OK means current-and-fresh.
+  if (row.source_status === HEALTHY && row.derived_nav_usd !== null) {
+    return {
+      origin: "CURRENT",
+      derived_nav_usd: row.derived_nav_usd,
+      gross_market_value_usd: row.gross_market_value_usd,
+      gross_leverage: row.gross_leverage,
+      source_retrieved_at: row.source_retrieved_at ?? null,
+      age_ms: null,
+      age_tier: null,
+      current_source_status: row.source_status,
+    };
+  }
+  const lkg = lkgByName.get(row.broker);
+  if (lkg) {
+    const ageMs = Math.max(0, Number(nowMs) - timestamp(lkg.source_retrieved_at));
+    return {
+      origin: "LKG",
+      derived_nav_usd: lkg.derived_nav_usd,
+      gross_market_value_usd: lkg.gross_market_value_usd,
+      gross_leverage: lkg.gross_leverage,
+      source_retrieved_at: lkg.source_retrieved_at,
+      age_ms: ageMs,
+      age_tier: lastKnownGoodAgeTier(ageMs),
+      current_source_status: row.source_status,
+    };
+  }
+  return {
+    origin: "NONE",
+    derived_nav_usd: null,
+    gross_market_value_usd: null,
+    gross_leverage: null,
+    source_retrieved_at: null,
+    age_ms: null,
+    age_tier: null,
+    current_source_status: row.source_status,
+  };
 }
 
 export function portfolioOverviewPresentation(currentValue, lastConfirmedValue, nowMs = Date.now()) {
@@ -1163,16 +1300,105 @@ export function portfolioOverviewPresentation(currentValue, lastConfirmedValue, 
   const expectedBrokers = Array.isArray(current?.expected_brokers)
     ? current.expected_brokers : [];
   const brokerStatus = new Map(brokerRows.map((row) => [row.broker, row.source_status]));
+  const lkgRows = Array.isArray(current?.broker_last_known_good)
+    ? current.broker_last_known_good : [];
+  const lkgByName = new Map(lkgRows.map((row) => [row.broker, row]));
+  const displayRows = brokerRows.map((row) => ({
+    ...row,
+    display: brokerDisplayResolution(row, lkgByName, nowMs),
+  }));
+  const displayByBroker = new Map(displayRows.map((row) => [row.broker, row]));
+  const missingBrokers = expectedBrokers.filter(
+    (broker) => displayByBroker.get(broker)?.display.origin !== "CURRENT"
+      && displayByBroker.get(broker)?.display.origin !== "LKG",
+  );
+  const currentMissingBrokers = expectedBrokers.filter(
+    (broker) => brokerStatus.get(broker) !== HEALTHY,
+  );
+  const lkgBrokers = displayRows
+    .filter((row) => row.display.origin === "LKG")
+    .map((row) => row.broker);
+  const mixedTimepoints = lkgBrokers.length > 0;
+  // Mixed completeness is explicit: every expected broker must actually be
+  // present in displayByBroker with an affirmative CURRENT or LKG origin.
+  // An absent row must never count as displayable, and the totals below
+  // must never zero-fill a hole.
+  const allDisplayable = expectedBrokers.length > 0
+    && expectedBrokers.every((broker) => {
+      const origin = displayByBroker.get(broker)?.display?.origin;
+      return origin === "CURRENT" || origin === "LKG";
+    });
+  // Sums propagate null: any missing or non-finite display value collapses
+  // the total to unknown instead of contributing zero.
+  const sumDisplayField = (field) => expectedBrokers.reduce((sum, broker) => {
+    if (sum === null) return null;
+    const value = displayByBroker.get(broker)?.display?.[field];
+    if (typeof value !== "number" || !Number.isFinite(value)) return null;
+    return sum + value;
+  }, 0);
+  let displayNav = null;
+  let displayGross = null;
+  let displayLeverage = null;
+  if (complete) {
+    displayNav = current.derived_nav_usd;
+    displayGross = current.gross_market_value_usd;
+    displayLeverage = current.gross_leverage;
+  } else if (allDisplayable) {
+    // Mixed-timepoint display total: sum the per-broker display values
+    // (current where fresh, LKG otherwise). Presentation only — never fed
+    // back into gates, history or suggestions.
+    const navSum = sumDisplayField("derived_nav_usd");
+    const grossSum = sumDisplayField("gross_market_value_usd");
+    if (navSum !== null && grossSum !== null) {
+      displayNav = Math.round(navSum * 100) / 100;
+      displayGross = Math.round(grossSum * 100) / 100;
+      displayLeverage = displayNav > 0 ? displayGross / displayNav : null;
+    }
+  }
+  const lkgDisplayRows = displayRows.filter((row) => row.display.origin === "LKG");
+  const tierRank = { DELAYED: 0, WARN: 1, SEVERE: 2 };
+  const worstTier = lkgDisplayRows.reduce((worst, row) => {
+    const tier = row.display.age_tier;
+    if (tier === null) return worst;
+    if (worst === null || tierRank[tier] > tierRank[worst]) return tier;
+    return worst;
+  }, null);
+  const oldestLkg = lkgDisplayRows.reduce((oldest, row) => {
+    const retrievedAt = timestamp(row.display.source_retrieved_at);
+    if (retrievedAt === null) return oldest;
+    if (oldest === null || retrievedAt < oldest.retrievedAt) {
+      return { retrievedAt, asOf: row.display.source_retrieved_at, ageMs: row.display.age_ms };
+    }
+    return oldest;
+  }, null);
   return {
     source_status: sourceStatus,
     source_retrieved_at: current?.source_retrieved_at ?? null,
-    derived_nav_usd: complete ? current.derived_nav_usd : null,
-    gross_market_value_usd: complete ? current.gross_market_value_usd : null,
-    gross_leverage: complete ? current.gross_leverage : null,
+    derived_nav_usd: displayNav,
+    gross_market_value_usd: displayGross,
+    gross_leverage: displayLeverage,
     gross_leverage_red: current?.gross_leverage_red ?? null,
     expected_brokers: [...expectedBrokers],
-    missing_brokers: expectedBrokers.filter((broker) => brokerStatus.get(broker) !== HEALTHY),
-    broker_breakdown: brokerRows,
+    missing_brokers: missingBrokers,
+    current_missing_brokers: currentMissingBrokers,
+    broker_breakdown: displayRows,
+    display_summary: {
+      // MIXED_LKG is only claimed when the mixed total was actually
+      // computed; a completeness or summation failure stays INCOMPLETE.
+      mode: complete
+        ? "CURRENT_COMPLETE"
+        : allDisplayable && displayNav !== null && displayGross !== null
+          ? "MIXED_LKG"
+          : "INCOMPLETE",
+      mixed_timepoints: mixedTimepoints,
+      lkg_brokers: lkgBrokers,
+      current_brokers: displayRows
+        .filter((row) => row.display.origin === "CURRENT")
+        .map((row) => row.broker),
+      worst_age_tier: worstTier,
+      oldest_lkg_as_of: oldestLkg?.asOf ?? null,
+      oldest_lkg_age_ms: oldestLkg?.ageMs ?? null,
+    },
     last_confirmed: lastConfirmed,
   };
 }
