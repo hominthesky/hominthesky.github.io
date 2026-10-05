@@ -1505,6 +1505,7 @@ input:focus {
 .live-target-head span { color: var(--muted); font-size: 10px; }
 .live-target-formula { margin: 0; color: var(--text-secondary); font-size: 12px; font-weight: 750; }
 .live-target-note,
+.live-target-scope,
 .live-transport-status { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 
 .live-preferences {
