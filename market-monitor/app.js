@@ -75,7 +75,7 @@ const LIVE_CLIENT = Object.freeze({
 });
 const unlockPersistence = createUnlockPersistence({ origin: window.location.origin });
 const STRATEGY_ANALYSIS_FORMULA = "bucket_actual_pct=classified_bucket/total_classified_long; rebalance_amount=total_classified_long*target_pct-classified_bucket; portfolio_twr=portfolio_total_return_v1.cumulative_total_return; portfolio_mwr=portfolio_money_weighted_return_v1.money_weighted_return";
-const STRATEGY_ANALYSIS_CONTRACT = "strategy_analysis_v2";
+const STRATEGY_ANALYSIS_CONTRACT = "strategy_analysis_v3";
 const liveRuntime = {
   transportStatus: LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING",
   pollState: LIVE_CLIENT.payloadUrl ? "idle" : "disabled",
@@ -3906,17 +3906,35 @@ function renderStrategy() {
   const latestTiger = latestBrokerReturn("Tiger");
   const latestIbkr = latestBrokerReturn("IBKR");
   const combined = Array.isArray(data.portfolio_returns) ? data.portfolio_returns.at(-1) : null;
+  const freshness = data.return_freshness;
+  // Old payloads (pre-v3) carry no freshness block; a malformed block must
+  // never raise here — the freshness pill simply does not render. MISSING is
+  // a legal freshness for a live input (a required broker has no return rows
+  // at all) and must not silently disappear.
+  const freshnessStatus = ["OK", "EXPECTED_LAG", "STALE", "MISSING"].includes(freshness?.status)
+    ? freshness.status : null;
   const hero = el("section", "strategy-hero");
+  const heroBadges = append(el("div", "strategy-hero-badges"),
+    el("span", `status-pill ${data.status === "COMPLETE" ? "green" : "amber"}`, `策略输入截至 ${data.as_of || "—"} · ${data.status || "MISSING"}`));
+  if (freshnessStatus !== null && freshnessStatus !== "OK") {
+    const freshnessPillText = {
+      EXPECTED_LAG: "收益输入滞后",
+      STALE: "收益输入已过期",
+      MISSING: "收益输入缺失",
+    };
+    append(heroBadges, el("span", `status-pill ${freshnessStatus === "EXPECTED_LAG" ? "amber" : "red"}`,
+      `${freshnessPillText[freshnessStatus]}（截至 ${data.as_of || "—"}）`));
+  }
   append(hero,
     el("div", "strategy-hero-copy", "把长期资产增长、不同券商策略实验和当前配置放在同一口径下复盘；不与生活现金流相加。"),
-    el("span", `status-pill ${data.status === "COMPLETE" ? "green" : "amber"}`, `${data.as_of || "—"} · ${data.status || "MISSING"}`),
+    heroBadges,
   );
   root.appendChild(hero);
   const metrics = el("section", "strategy-summary-grid");
   const summaryRows = [
     ["跨券商共同区间 TWR", combined ? pct(combined.twr) : "—", combined ? `MWR ${pct(combined.mwr)} · ${combined.start_date}—${combined.end_date}` : "共同日终历史或资金流覆盖不足"],
-    ["Futu 最新 TWR", latestFutu ? pct(latestFutu.twr) : "—", latestFutu ? `MWR ${pct(latestFutu.mwr)} · ${latestFutu.coverage_status}` : "券商原生历史缺失"],
-    ["Tiger 最新 TWR", latestTiger ? pct(latestTiger.twr) : "—", latestTiger ? `MWR ${pct(latestTiger.mwr)} · ${latestTiger.coverage_status}` : "券商原生历史缺失"],
+    ["Futu 最新 TWR", latestFutu ? pct(latestFutu.twr) : "—", latestFutu ? `MWR ${pct(latestFutu.mwr)} · ${latestFutu.coverage_status} · ${latestFutu.start_date}—${latestFutu.end_date}` : "券商原生历史缺失"],
+    ["Tiger 最新 TWR", latestTiger ? pct(latestTiger.twr) : "—", latestTiger ? `MWR ${pct(latestTiger.mwr)} · ${latestTiger.coverage_status} · ${latestTiger.start_date}—${latestTiger.end_date}` : "券商原生历史缺失"],
     ["IBKR 最新 TWR", latestIbkr ? pct(latestIbkr.twr) : "—", latestIbkr ? `Flex 原生 · MWR 不可用 · ${latestIbkr.end_date}` : "Flex 原生收益缺失"],
   ];
   summaryRows.forEach(([label, value, note]) => {
@@ -3925,7 +3943,11 @@ function renderStrategy() {
     metrics.appendChild(card);
   });
   root.appendChild(metrics);
-  const trend = section("跨券商收益与成长趋势", "年度看券商原生 TWR/MWR；月度只展示有证据支持的走势口径，缺失不补零。 ");
+  const trendCopy = "年度看券商原生 TWR/MWR；月度只展示有证据支持的走势口径，缺失不补零。 "
+    + (freshnessStatus === "STALE"
+      ? `收益历史输入截至 ${data.as_of || "—"}，此后月份未更新；缺失月份不补零。`
+      : "");
+  const trend = section("跨券商收益与成长趋势", trendCopy);
   trend.appendChild(renderStrategyTrend(data)); root.appendChild(trend);
 
   const brokerSection = section("逐券商策略复盘", "Futu、Tiger 与 IBKR 独立列示；IBKR 当前只有原生 TWR，不把缺失的 MWR 或盈亏补成零。 ");
@@ -3945,7 +3967,11 @@ function renderStrategy() {
     ? strategyPresentation.broker_breakdown : [];
   for (const broker of ["Futu", "Tiger", "IBKR"]) {
     const rows = annual.filter((row) => row.broker === broker).sort((a, b) => b.year - a.year)
-      .map((row) => ({ ...row, pnl_display: strategyOriginalPnl(row) }));
+      .map((row) => ({
+        ...row,
+        window: row.start_date && row.end_date ? `${row.start_date}—${row.end_date}` : null,
+        pnl_display: strategyOriginalPnl(row),
+      }));
     const current = currentBrokers.find((row) => row?.broker === broker);
     const brokerDisplay = strategyDisplayByBroker.get(broker)?.display || null;
     const brokerHeadNote = `净资产 ${usd(brokerDisplay?.derived_nav_usd, true)}`
@@ -3968,6 +3994,7 @@ function renderStrategy() {
     card.appendChild(brokerHead);
     card.appendChild(table([
       { key: "year", label: "年度" },
+      { key: "window", label: "窗口" },
       { key: "twr", label: "TWR", numeric: true, render: pct },
       { key: "mwr", label: "MWR", numeric: true, render: pct },
       { key: "pnl_display", label: "券商年度盈亏", numeric: true },
