@@ -75,7 +75,7 @@ const LIVE_CLIENT = Object.freeze({
 });
 const unlockPersistence = createUnlockPersistence({ origin: window.location.origin });
 const STRATEGY_ANALYSIS_FORMULA = "bucket_actual_pct=classified_bucket/total_classified_long; rebalance_amount=total_classified_long*target_pct-classified_bucket; portfolio_twr=portfolio_total_return_v1.cumulative_total_return; portfolio_mwr=portfolio_money_weighted_return_v1.money_weighted_return";
-const STRATEGY_ANALYSIS_CONTRACT = "strategy_analysis_v2";
+const STRATEGY_ANALYSIS_CONTRACT = "strategy_analysis_v3";
 const liveRuntime = {
   transportStatus: LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING",
   pollState: LIVE_CLIENT.payloadUrl ? "idle" : "disabled",
@@ -3890,12 +3890,163 @@ function renderHoldings() {
   root.appendChild(quality);
 }
 
+const STRATEGY_FRESHNESS_GRACE_DAYS = 10;
+
+// MANUAL_INPUT_MONTHLY_CADENCE_V1 evaluated in the browser against the
+// current America/New_York calendar day, so a frozen static payload cannot
+// keep a stale input green. Third implementation of the same rule (Python
+// producer, Pages sanitizer, here); existence and constants are pinned by
+// test_ui_static_contract.mjs.
+function strategyFreshnessMonthEnd(year, month) {
+  const last = new Date(Date.UTC(year, month, 0));
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${last.getUTCFullYear()}-${pad(last.getUTCMonth() + 1)}-${pad(last.getUTCDate())}`;
+}
+
+// The NY calendar day drives the freshness verdict and its lifecycle
+// rechecks; always derived from a timestamp (default: the mockable wall
+// clock), never cached from page load.
+function strategyNyToday(nowMs = Date.now()) {
+  return easternCalendarDate(new Date(nowMs));
+}
+
+// Display severity: the browser may only AGE the transported verdict
+// (OK -> EXPECTED_LAG -> STALE -> MISSING), never improve it — a device
+// clock running behind must not wash a server STALE back to green.
+const STRATEGY_FRESHNESS_STATUS_SEVERITY = Object.freeze({
+  OK: 0,
+  EXPECTED_LAG: 1,
+  STALE: 2,
+  MISSING: 3,
+});
+
+function strategyFreshnessWorse(aged, transported) {
+  return STRATEGY_FRESHNESS_STATUS_SEVERITY[aged] >= STRATEGY_FRESHNESS_STATUS_SEVERITY[transported]
+    ? aged
+    : transported;
+}
+
+function strategyFreshnessDisplayStatus(freshness, nowMs = Date.now()) {
+  if (!freshness || typeof freshness !== "object"
+    || !["OK", "EXPECTED_LAG", "STALE", "MISSING"].includes(freshness.status)) return null;
+  // MISSING is preserved verbatim whatever the local clock claims.
+  if (freshness.status === "MISSING") return "MISSING";
+  const edge = freshness.evidence_edge;
+  if (edge === null || edge === undefined) return null;
+  if (typeof edge !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(edge)) return null;
+  const today = strategyNyToday(nowMs);
+  const todayMs = Date.parse(`${today}T00:00:00Z`);
+  let year = Number(today.slice(0, 4));
+  let month = Number(today.slice(5, 7));
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const monthEnd = strategyFreshnessMonthEnd(year, month);
+    const ageDays = Math.round((todayMs - Date.parse(`${monthEnd}T00:00:00Z`)) / 86400000);
+    if (ageDays >= STRATEGY_FRESHNESS_GRACE_DAYS) {
+      const previous = strategyFreshnessMonthEnd(
+        month === 1 ? year - 1 : year, month === 1 ? 12 : month - 1,
+      );
+      const aged = edge >= monthEnd ? "OK" : edge >= previous ? "EXPECTED_LAG" : "STALE";
+      // One-way aging: display the worse of the browser recomputation and
+      // the transported server status; a slow clock can keep or worsen the
+      // verdict but never soften it.
+      return strategyFreshnessWorse(aged, freshness.status);
+    }
+    year = month === 1 ? year - 1 : year;
+    month = month === 1 ? 12 : month - 1;
+  }
+  return null;
+}
+
+// Freshness-dependent presentation, isolated so the bounded lifecycle
+// recheck (refreshStrategyFreshnessDisplay) can patch exactly these nodes
+// without re-rendering charts, filters or focus.
+function strategyFreshnessPillNode(displayStatus, freshnessEdge) {
+  if (displayStatus === "EXPECTED_LAG" || displayStatus === "STALE") {
+    return el("span", `status-pill strategy-freshness-pill ${displayStatus === "STALE" ? "red" : "amber"}`,
+      `收益输入${displayStatus === "STALE" ? "已过期" : "滞后"}（证据截至 ${freshnessEdge}）`);
+  }
+  if (displayStatus === "MISSING") {
+    return el("span", "status-pill strategy-freshness-pill red", "收益输入缺失");
+  }
+  return null;
+}
+
+function strategyTrendCopyText(displayStatus, freshnessEdge) {
+  return "年度看券商原生 TWR/MWR；月度只展示有证据支持的走势口径，缺失不补零。 "
+    + (displayStatus === "STALE"
+      ? `收益证据截至 ${freshnessEdge}，此后月份未更新；缺失月份不补零。`
+      : "");
+}
+
+// Long-lived strategy tabs: freshness only moves with the NY calendar day,
+// so a bounded interval re-evaluates it while the strategy view is the
+// active, visible view; visibility recovery re-evaluates immediately.
+const STRATEGY_FRESHNESS_RECHECK_MS = 60_000;
+let strategyFreshnessTimer = null;
+let strategyFreshnessRenderedKey = "";
+let strategyFreshnessBadgesHost = null;
+let strategyTrendCopyHost = null;
+
+function strategyFreshnessRenderKey(displayStatus, freshnessEdge, nyToday) {
+  return `${displayStatus ?? "none"}|${freshnessEdge ?? "none"}|${nyToday}`;
+}
+
+function stopStrategyFreshnessTimer() {
+  if (strategyFreshnessTimer === null) return;
+  window.clearInterval(strategyFreshnessTimer);
+  strategyFreshnessTimer = null;
+}
+
+function syncStrategyFreshnessTimer() {
+  if (activeView !== "strategy" || document.hidden || !monitorData) {
+    stopStrategyFreshnessTimer();
+    return;
+  }
+  // At most one bounded interval: repeated renders or view switches must
+  // never stack listeners or accumulate timers.
+  if (strategyFreshnessTimer !== null) return;
+  strategyFreshnessTimer = window.setInterval(
+    () => refreshStrategyFreshnessDisplay(),
+    STRATEGY_FRESHNESS_RECHECK_MS,
+  );
+}
+
+// Recomputes the freshness display from the current NY day and patches only
+// the hero pill and the trend copy. Returns true when the DOM changed, so
+// callers and tests can distinguish a real boundary update from a no-op tick.
+function refreshStrategyFreshnessDisplay() {
+  if (!monitorData || activeView !== "strategy") return false;
+  const data = monitorData.strategy || {};
+  if (data.contract_id !== STRATEGY_ANALYSIS_CONTRACT || data.formula !== STRATEGY_ANALYSIS_FORMULA) {
+    return false;
+  }
+  const freshness = data.return_freshness;
+  const freshnessEdge = typeof freshness?.evidence_edge === "string"
+    && /^\d{4}-\d{2}-\d{2}$/.test(freshness.evidence_edge) ? freshness.evidence_edge : null;
+  const displayStatus = strategyFreshnessDisplayStatus(freshness);
+  const key = strategyFreshnessRenderKey(displayStatus, freshnessEdge, strategyNyToday());
+  if (key === strategyFreshnessRenderedKey) return false;
+  if (strategyFreshnessBadgesHost) {
+    strategyFreshnessBadgesHost.querySelectorAll(".strategy-freshness-pill").forEach((pill) => pill.remove());
+    const pill = strategyFreshnessPillNode(displayStatus, freshnessEdge);
+    if (pill) strategyFreshnessBadgesHost.appendChild(pill);
+  }
+  if (strategyTrendCopyHost) {
+    strategyTrendCopyHost.textContent = strategyTrendCopyText(displayStatus, freshnessEdge);
+  }
+  strategyFreshnessRenderedKey = key;
+  return true;
+}
+
 function renderStrategy() {
   const root = byId("strategy-content");
   root.replaceChildren();
   const data = monitorData.strategy || {};
   if (data.contract_id !== STRATEGY_ANALYSIS_CONTRACT || data.formula !== STRATEGY_ANALYSIS_FORMULA) {
     root.appendChild(el("p", "empty-state", "组合策略数据契约不匹配，已停止展示派生指标。"));
+    strategyFreshnessBadgesHost = null;
+    strategyTrendCopyHost = null;
+    strategyFreshnessRenderedKey = "";
     return;
   }
   const annual = Array.isArray(data.annual_returns) ? data.annual_returns : [];
@@ -3906,17 +4057,34 @@ function renderStrategy() {
   const latestTiger = latestBrokerReturn("Tiger");
   const latestIbkr = latestBrokerReturn("IBKR");
   const combined = Array.isArray(data.portfolio_returns) ? data.portfolio_returns.at(-1) : null;
+  const freshness = data.return_freshness;
+  const freshnessEdge = typeof freshness?.evidence_edge === "string"
+    && /^\d{4}-\d{2}-\d{2}$/.test(freshness.evidence_edge) ? freshness.evidence_edge : null;
+  // The shown status is the worse of the transported server status and the
+  // browser recomputation from the evidence edge against the current NY day:
+  // the browser may only age the verdict, never improve it, so a device
+  // clock running behind cannot wash a server STALE back to green.
+  // Missing/malformed blocks (old payloads) render no pill.
+  const displayStatus = strategyFreshnessDisplayStatus(freshness);
   const hero = el("section", "strategy-hero");
+  const heroBadges = append(el("div", "strategy-hero-badges"),
+    el("span", `status-pill ${data.status === "COMPLETE" ? "green" : "amber"}`, `策略输入截至 ${data.as_of || "—"}`),
+    el("span", `status-pill ${data.status === "COMPLETE" ? "green" : "amber"}`, `配置 ${data.status || "MISSING"}`));
+  const freshnessPill = strategyFreshnessPillNode(displayStatus, freshnessEdge);
+  if (freshnessPill) heroBadges.appendChild(freshnessPill);
+  // Hosts let the bounded freshness recheck patch only the pill and the
+  // trend copy; charts, filters and focus are never rebuilt by that path.
+  strategyFreshnessBadgesHost = heroBadges;
   append(hero,
     el("div", "strategy-hero-copy", "把长期资产增长、不同券商策略实验和当前配置放在同一口径下复盘；不与生活现金流相加。"),
-    el("span", `status-pill ${data.status === "COMPLETE" ? "green" : "amber"}`, `${data.as_of || "—"} · ${data.status || "MISSING"}`),
+    heroBadges,
   );
   root.appendChild(hero);
   const metrics = el("section", "strategy-summary-grid");
   const summaryRows = [
     ["跨券商共同区间 TWR", combined ? pct(combined.twr) : "—", combined ? `MWR ${pct(combined.mwr)} · ${combined.start_date}—${combined.end_date}` : "共同日终历史或资金流覆盖不足"],
-    ["Futu 最新 TWR", latestFutu ? pct(latestFutu.twr) : "—", latestFutu ? `MWR ${pct(latestFutu.mwr)} · ${latestFutu.coverage_status}` : "券商原生历史缺失"],
-    ["Tiger 最新 TWR", latestTiger ? pct(latestTiger.twr) : "—", latestTiger ? `MWR ${pct(latestTiger.mwr)} · ${latestTiger.coverage_status}` : "券商原生历史缺失"],
+    ["Futu 最新 TWR", latestFutu ? pct(latestFutu.twr) : "—", latestFutu ? `MWR ${pct(latestFutu.mwr)} · ${latestFutu.coverage_status} · ${latestFutu.start_date}—${latestFutu.end_date}` : "券商原生历史缺失"],
+    ["Tiger 最新 TWR", latestTiger ? pct(latestTiger.twr) : "—", latestTiger ? `MWR ${pct(latestTiger.mwr)} · ${latestTiger.coverage_status} · ${latestTiger.start_date}—${latestTiger.end_date}` : "券商原生历史缺失"],
     ["IBKR 最新 TWR", latestIbkr ? pct(latestIbkr.twr) : "—", latestIbkr ? `Flex 原生 · MWR 不可用 · ${latestIbkr.end_date}` : "Flex 原生收益缺失"],
   ];
   summaryRows.forEach(([label, value, note]) => {
@@ -3925,7 +4093,9 @@ function renderStrategy() {
     metrics.appendChild(card);
   });
   root.appendChild(metrics);
-  const trend = section("跨券商收益与成长趋势", "年度看券商原生 TWR/MWR；月度只展示有证据支持的走势口径，缺失不补零。 ");
+  const trendCopy = strategyTrendCopyText(displayStatus, freshnessEdge);
+  const trend = section("跨券商收益与成长趋势", trendCopy);
+  strategyTrendCopyHost = trend.querySelector(".section-copy");
   trend.appendChild(renderStrategyTrend(data)); root.appendChild(trend);
 
   const brokerSection = section("逐券商策略复盘", "Futu、Tiger 与 IBKR 独立列示；IBKR 当前只有原生 TWR，不把缺失的 MWR 或盈亏补成零。 ");
@@ -3945,7 +4115,11 @@ function renderStrategy() {
     ? strategyPresentation.broker_breakdown : [];
   for (const broker of ["Futu", "Tiger", "IBKR"]) {
     const rows = annual.filter((row) => row.broker === broker).sort((a, b) => b.year - a.year)
-      .map((row) => ({ ...row, pnl_display: strategyOriginalPnl(row) }));
+      .map((row) => ({
+        ...row,
+        window: row.start_date && row.end_date ? `${row.start_date}—${row.end_date}` : null,
+        pnl_display: strategyOriginalPnl(row),
+      }));
     const current = currentBrokers.find((row) => row?.broker === broker);
     const brokerDisplay = strategyDisplayByBroker.get(broker)?.display || null;
     const brokerHeadNote = `净资产 ${usd(brokerDisplay?.derived_nav_usd, true)}`
@@ -3968,6 +4142,7 @@ function renderStrategy() {
     card.appendChild(brokerHead);
     card.appendChild(table([
       { key: "year", label: "年度" },
+      { key: "window", label: "窗口" },
       { key: "twr", label: "TWR", numeric: true, render: pct },
       { key: "mwr", label: "MWR", numeric: true, render: pct },
       { key: "pnl_display", label: "券商年度盈亏", numeric: true },
@@ -4019,6 +4194,11 @@ function renderStrategy() {
     const item = el("article", "strategy-quality-item"); append(item, el("strong", "", label), el("p", "", body)); list.appendChild(item);
   });
   root.appendChild(quality);
+  // Snapshot what the freshness display depends on, so lifecycle rechecks
+  // only touch the DOM when the verdict or the NY day actually changed.
+  strategyFreshnessRenderedKey = strategyFreshnessRenderKey(
+    displayStatus, freshnessEdge, strategyNyToday(),
+  );
 }
 
 function setDrawerOpen(open) {
@@ -4069,6 +4249,9 @@ function switchView(view) {
   if (view === "holdings" && unlockKey && holdingsRuntime.state !== "loading") {
     void loadPrivateHoldings();
   }
+  // Strategy freshness rechecks live only while the strategy view is the
+  // active one; every other view cancels the bounded interval.
+  syncStrategyFreshnessTimer();
 }
 
 function renderCurrencyControl() {
@@ -4204,6 +4387,10 @@ function activateDashboard(unlocked, { persistenceRecord = null, persistenceWarn
 
 function clearUnlockedDashboard() {
   stopLivePolling();
+  stopStrategyFreshnessTimer();
+  strategyFreshnessBadgesHost = null;
+  strategyTrendCopyHost = null;
+  strategyFreshnessRenderedKey = "";
   holdingsRequestGeneration += 1;
   unlockKey = null;
   unlockPersistenceRecord = null;
@@ -4370,12 +4557,17 @@ document.addEventListener("keydown", (event) => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     stopLivePolling();
+    stopStrategyFreshnessTimer();
     return;
   }
   if (unlockKey && monitorData) {
     scheduleLivePolling(0);
     renderLiveOnly();
   }
+  // Freshness is re-derived from the wall clock immediately on recovery —
+  // independent of the live channel — then the bounded interval resumes.
+  refreshStrategyFreshnessDisplay();
+  syncStrategyFreshnessTimer();
 });
 
 byId("lock-button").addEventListener("click", async () => {

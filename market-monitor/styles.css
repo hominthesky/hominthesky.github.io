@@ -2629,6 +2629,8 @@ footer {
 
 .strategy-hero-copy { max-width: 820px; color: var(--text-secondary); line-height: 1.65; }
 
+.strategy-hero-badges { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+
 .strategy-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -4088,11 +4090,24 @@ footer {
     font-size: 14px;
   }
 
+  /* CR-20261023-01: this band's retired 112px hard cap (nowrap + ellipsis)
+     hid the strategy evidence dates, the holdings hero timestamp and the
+     header status wording across every view at <=460px. Pills now cap at
+     their containing block and wrap semantic text to a second line instead;
+     the dot, capsule and tone colors keep the status affordance. Single-line
+     pills are unchanged: min-height 28px absorbs the taller line box. */
   .status-pill {
-    max-width: 112px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    max-width: 100%;
+    overflow: visible;
+    white-space: normal;
+    line-height: 1.4;
+  }
+
+  /* The header title block sits in a row flex next to the mobile menu
+     button; without a zero minimum a long unbreakable token would push the
+     row (and the button) past the content rail at 320px. */
+  .header-title-row > div {
+    min-width: 0;
   }
 
   .trading-chart-summary,
