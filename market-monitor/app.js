@@ -3245,18 +3245,29 @@ function strategyTrendData(data) {
   if (strategyReturnCadence === "month") {
     const rows = Array.isArray(data.monthly_returns) ? data.monthly_returns : [];
     const labels = [...new Set(rows.map((row) => row.period))].sort().slice(-24);
+    // CR-20261030-01: Tiger months may carry two sources (SYSTEM_DAILY
+    // daily-RoR chain vs BROKER_DISPLAY broker-app interval readings). They
+    // are separate series so a source switch never draws a connecting line
+    // across the boundary; each series stays sparse (months without a row of
+    // that exact source render no point and break the line).
     return {
       labels,
       series: [
-        ["Futu", "#2563eb"],
-        ["Tiger", "#d97706"],
-      ].map(([broker, color]) => ({
-        id: broker,
-        label: broker,
+        ["Futu", null, "Futu", "#2563eb"],
+        ["Tiger", "SYSTEM_DAILY", "Tiger 日级走势", "#d97706"],
+        ["Tiger", "BROKER_DISPLAY", "Tiger App 展示", "#fbbf24"],
+      ].map(([broker, sourceKind, label, color]) => ({
+        id: sourceKind ? `${broker}-${sourceKind}` : broker,
+        label,
         color,
-        values: labels.map((label) => rows.find((row) => row.broker === broker && row.period === label)?.return ?? null),
+        values: labels.map(
+          (period) => rows.find(
+            (row) => row.broker === broker && row.period === period
+              && (sourceKind === null || row.source_kind === sourceKind),
+          )?.return ?? null,
+        ),
       })),
-      note: "Futu 为券商月度展示收益，不可链式复原年度 TWR/MWR；Tiger 为日级 RoR 链式月度走势；IBKR Flex 当前只提供 YTD 原生 TWR，没有月度序列，不补造折线。",
+      note: "Futu 为券商月度展示收益，不可链式复原年度 TWR/MWR；Tiger 月度逐行标注来源，日级 RoR 链式走势与 App 展示区间收益分列两条线，不跨来源混算或连接；IBKR Flex 当前只提供 YTD 原生 TWR，没有月度序列，不补造折线。",
     };
   }
   const rows = Array.isArray(data.annual_returns) ? data.annual_returns : [];
@@ -3307,7 +3318,16 @@ function selectedStrategySeries(trend) {
   let stored = [];
   try {
     const parsed = JSON.parse(localStorage.getItem(`zzao-monitor-strategy-series-${strategyReturnCadence}`) || "[]");
-    stored = Array.isArray(parsed) ? parsed.filter((id) => available.includes(id)) : [];
+    // CR-20261030-01: the merged monthly "Tiger" series id split into
+    // Tiger-SYSTEM_DAILY / Tiger-BROKER_DISPLAY. A selection saved before the
+    // split keeps showing the Tiger line(s) via this alias expansion instead
+    // of silently dropping them (unknown/aliased ids still filter to
+    // available series; other cadences are unaffected).
+    const legacyAliases = { Tiger: ["Tiger-SYSTEM_DAILY", "Tiger-BROKER_DISPLAY"] };
+    stored = Array.isArray(parsed)
+      ? [...new Set(parsed.flatMap((id) => [id, ...(legacyAliases[id] || [])]))]
+        .filter((id) => available.includes(id))
+      : [];
   } catch (_error) {
     stored = [];
   }
@@ -4187,7 +4207,7 @@ function renderStrategy() {
   [
     ["券商原生年度", "逐券商历史比较的主事实；2020 Futu 和当年 YTD 明确为部分年度。"],
     ["Futu 月度展示", "截图月格不可链式复原年度 TWR/MWR，因此只做走势参考。"],
-    ["Tiger 日级走势", "从 2024-11-27 的真实非零起点计算；App 年度值仍独立保留。"],
+    ["Tiger 月度走势", "两种来源逐行标注：日级 RoR 链式（从 2024-11-27 的真实非零起点计算）与 App 展示区间收益分列两条线，不跨来源混算或连接；App 年度值仍独立保留。"],
     ["IBKR 原生 TWR", "Flex Change in NAV 只提供 YTD 原生 TWR；当前没有受治理 MWR、年度盈亏或月度序列。"],
     ["SPY / QQQ", "当前为正常交易时段价格回报，不含分红再投资，不能称为总回报。"],
   ].forEach(([label, body]) => {
