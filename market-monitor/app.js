@@ -46,6 +46,12 @@ let portfolioCurrentSummary = null;
 let portfolioOverviewSummary = null;
 let portfolioReturnReferenceSummary = null;
 let portfolioReturnWeightSummary = null;
+// CR-20261029-01: last VALIDATED daily-return-history health snapshot. The
+// live risk-gate summary is replaced wholesale on every merge and the static
+// pages summary is rebuilt field-by-field by the transport allowlist, so the
+// health DTO is kept here (validated, dated by its own computed_at) instead
+// of being read implicitly from monitorData. Never holds an unvalidated dict.
+let portfolioHistoryHealth = null;
 let unlockKey = null;
 let unlockPersistenceRecord = null;
 let unlockPersistenceWarning = "";
@@ -585,6 +591,301 @@ const MANUAL_RETURN_REFERENCE_V2_CONTRACT = Object.freeze({
   formula: "broker_app_reported_ytd_time_weighted_and_money_weighted_returns",
 });
 
+// CR-20261029-01 daily return history health - begin
+// Client boundary of the public `personal.risk_gate.daily_return_history_health`
+// DTO (schema_version 1, flat, exactly 16 fields). Mirrors the core
+// sanitizer: unknown fields drop the WHOLE metadata object (private keys are
+// never copied through), counts must be native integers (booleans and
+// numeric strings are rejected), dates are canonical and cannot be in the
+// future (America/New_York EOD bound: before 20:00 ET the bound is the prior
+// day), computed_at must be an aware UTC timestamp, and the cross-field
+// relationships (stored vs continuous vs expected/missing, gap receipt vs
+// gap reason, calendar availability) must hold. Fail-closed: any violation
+// yields null and the UI renders 历史状态未提供 · 无法确认 — never 积累中,
+// never a zero for an unknown count.
+const DAILY_RETURN_HISTORY_HEALTH_FIELDS = Object.freeze(new Set([
+  "schema_version", "metadata_status", "history_status", "stored_point_count",
+  "last_recorded_date", "latest_scope_start_date",
+  "continuous_valuation_point_count", "continuous_start_date",
+  "calendar_status", "expected_session_count", "missing_session_count",
+  "first_missing_session_date", "latest_missing_session_date",
+  "latest_gap_receipt_status", "latest_gap_reason", "computed_at",
+]));
+const DAILY_HISTORY_STATUSES = Object.freeze(new Set([
+  "NO_HISTORY", "ONE_POINT", "CONTINUOUS_ZERO", "CONTINUOUS_TWO_OR_MORE", "UNAVAILABLE",
+]));
+const DAILY_GAP_RECEIPT_STATUSES = Object.freeze(new Set(["REJECTED", "UNKNOWN", "NO_GAP"]));
+const DAILY_GAP_REASONS = Object.freeze(new Set([
+  "RECORDED", "UNCHANGED", "SOURCE_NOT_NEWER", "HISTORY_INVALID",
+  "SNAPSHOT_NOT_COMPLETE_POSTCLOSE", "SOURCE_TIME_INVALID",
+  "SOURCE_NOT_COMPLETE_POSTCLOSE", "BROKER_SNAPSHOT_INCOMPLETE",
+  "UNKNOWN", "NO_RECEIPT",
+]));
+// A REJECTED gap may only carry a coarse non-success observation reason.
+const DAILY_GAP_REJECTED_REASONS = Object.freeze(new Set([
+  "HISTORY_INVALID", "SNAPSHOT_NOT_COMPLETE_POSTCLOSE", "SOURCE_TIME_INVALID",
+  "SOURCE_NOT_COMPLETE_POSTCLOSE", "BROKER_SNAPSHOT_INCOMPLETE",
+]));
+// Closed public mapping for coarse gap reasons: raw codes never render.
+const DAILY_GAP_REASON_LABELS = Object.freeze({
+  HISTORY_INVALID: "历史未通过校验",
+  SNAPSHOT_NOT_COMPLETE_POSTCLOSE: "盘后快照不完整",
+  SOURCE_TIME_INVALID: "来源时间无效",
+  SOURCE_NOT_COMPLETE_POSTCLOSE: "来源盘后数据不完整",
+  BROKER_SNAPSHOT_INCOMPLETE: "券商快照不完整",
+});
+
+function validDailyHistoryCount(value) {
+  return value === null
+    || (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 1_000_000);
+}
+
+function validDailyHistoryDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const stamp = Date.UTC(year, month - 1, day);
+  const utc = new Date(stamp);
+  return utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === day;
+}
+
+// Future bound mirrors the core: the ET calendar date, minus one day before
+// the 20:00 ET completion boundary. hour % 24 guards h24 formatting at midnight.
+function dailyHistoryEtUpperStamp(now = Date.now()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", hour12: false,
+  }).formatToParts(new Date(now));
+  const pick = (type) => Number(parts.find((part) => part.type === type)?.value);
+  const stamp = Date.UTC(pick("year"), pick("month") - 1, pick("day"));
+  return (pick("hour") % 24) < 20 ? stamp - 86_400_000 : stamp;
+}
+
+// Exact timestamp contract shared with the transport validators
+// (build_live_payload.mjs / build_github_pages.mjs) and the core
+// ``sanitize_daily_return_history_health``: strict shape, canonical UTC
+// suffix only, real calendar date (V8 Date.parse would alias both a space
+// separator and 2026-02-30), and never in the future. Returns parsed UTC
+// milliseconds, else null.
+const DAILY_HISTORY_COMPUTED_AT_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+function dailyHistoryComputedAtMs(value) {
+  if (typeof value !== "string") return null;
+  const match = DAILY_HISTORY_COMPUTED_AT_PATTERN.exec(value);
+  if (match === null) return null;
+  const [, year, month, day, hour, minute, second] = match;
+  if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) return null;
+  // Canonical UTC only, exactly like the core ``endswith(("+00:00", "Z"))``.
+  if (!value.endsWith("Z") && !value.endsWith("+00:00")) return null;
+  const [y, m, d] = [Number(year), Number(month), Number(day)];
+  const stamp = Date.UTC(y, m - 1, d, Number(hour), Number(minute), Number(second));
+  const round = new Date(stamp);
+  if (round.getUTCFullYear() !== y || round.getUTCMonth() !== m - 1
+    || round.getUTCDate() !== d) return null;
+  // Fraction-inclusive epoch for the future guard (core/Node parity):
+  // Date.UTC above drops milliseconds, so a canonical .999 timestamp at a
+  // .100 clock must compare via Date.parse, never the truncated stamp. The
+  // strict shape/component checks already ran, so no V8 parse alias can
+  // reach this point. The returned ms also drives the DTO's own computed_at
+  // ET upper bound downstream.
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return null;
+  // Sub-millisecond future guard: Date.parse truncates the fraction to
+  // milliseconds, so .100001 at a .100000 clock would compare equal.
+  // Inspect the discarded fraction digits as a string (no float rounding)
+  // and compare the conservative ceiling parsed + 1 only against Date.now;
+  // the ET upper bound keeps the unrounded parsed ms.
+  const fractionStart = value.indexOf(".") + 1;
+  const fraction = fractionStart === 0 ? ""
+    : value.slice(fractionStart).replace(/(Z|\+00:00)$/, "");
+  const futureCheckMs = fraction.length > 3 && /[1-9]/.test(fraction.slice(3))
+    ? parsed + 1
+    : parsed;
+  return futureCheckMs <= Date.now() ? parsed : null;
+}
+
+function validDailyReturnHistoryHealth(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length !== DAILY_RETURN_HISTORY_HEALTH_FIELDS.size
+    || !keys.every((key) => DAILY_RETURN_HISTORY_HEALTH_FIELDS.has(key))) return null;
+  const computedMs = dailyHistoryComputedAtMs(value.computed_at);
+  if (typeof value.schema_version !== "number" || !Number.isInteger(value.schema_version)
+    || value.schema_version !== 1 || computedMs === null
+    || !["OK", "PARTIAL", "MISSING", "FAILED"].includes(value.metadata_status)
+    || !DAILY_HISTORY_STATUSES.has(value.history_status)
+    || !["OK", "UNAVAILABLE"].includes(value.calendar_status)
+    || (value.latest_gap_receipt_status !== null
+      && !DAILY_GAP_RECEIPT_STATUSES.has(value.latest_gap_receipt_status))
+    || (value.latest_gap_reason !== null && !DAILY_GAP_REASONS.has(value.latest_gap_reason))) return null;
+  const countKeys = ["stored_point_count", "continuous_valuation_point_count",
+    "expected_session_count", "missing_session_count"];
+  if (!countKeys.every((key) => validDailyHistoryCount(value[key]))) return null;
+  // The date upper bound derives from the DTO's OWN computed_at ET EOD
+  // (before 20:00 ET the bound is the prior day) — never the browser clock,
+  // mirroring the core and both transport validators exactly.
+  const upperStamp = dailyHistoryEtUpperStamp(computedMs);
+  const dateKeys = ["last_recorded_date", "latest_scope_start_date", "continuous_start_date",
+    "first_missing_session_date", "latest_missing_session_date"];
+  const dates = {};
+  for (const key of dateKeys) {
+    if (value[key] !== null) {
+      if (!validDailyHistoryDate(value[key]) || Date.parse(`${value[key]}T00:00:00Z`) > upperStamp) return null;
+      dates[key] = value[key];
+    } else {
+      dates[key] = null;
+    }
+  }
+  const [stored, continuous, expected, missing] = countKeys.map((key) => value[key]);
+  if ((value.metadata_status === "MISSING" || value.metadata_status === "FAILED") && stored !== null) return null;
+  if (value.metadata_status === "OK" && (value.calendar_status !== "OK"
+    || value.history_status === "UNAVAILABLE" || !(missing === null || missing === 0))) return null;
+  if (stored === null) {
+    if (value.history_status !== "UNAVAILABLE"
+      || (value.metadata_status !== "MISSING" && value.metadata_status !== "FAILED")
+      || countKeys.slice(1).some((key) => value[key] !== null)
+      || dateKeys.some((key) => dates[key] !== null)) return null;
+  } else if (stored === 0) {
+    if ((value.history_status !== "NO_HISTORY" && value.history_status !== "UNAVAILABLE")
+      || dateKeys.some((key) => dates[key] !== null)
+      || !(continuous === null || continuous === 0)
+      || expected !== null || missing !== null
+      || value.latest_gap_receipt_status !== null || value.latest_gap_reason !== null
+      || (value.calendar_status === "OK" && continuous !== 0)) return null;
+  } else {
+    if (dates.last_recorded_date === null) return null;
+    const start = dates.latest_scope_start_date;
+    if (start !== null && start > dates.last_recorded_date) return null;
+    if (continuous !== null) {
+      if (continuous > stored) return null;
+      if (continuous === 0 && dates.continuous_start_date !== null) return null;
+      if (continuous > 0 && (dates.continuous_start_date === null || start === null
+        || !(start <= dates.continuous_start_date && dates.continuous_start_date <= dates.last_recorded_date))) return null;
+    }
+    if (value.calendar_status === "OK") {
+      if (continuous === null || expected === null || missing === null || start === null
+        || !(0 <= missing && missing <= expected)
+        || !(continuous <= expected - missing && expected - missing <= stored)) return null;
+      const wanted = continuous === 0 ? "CONTINUOUS_ZERO"
+        : continuous === 1 ? "ONE_POINT" : "CONTINUOUS_TWO_OR_MORE";
+      if (value.history_status !== wanted) return null;
+      const spanDays = Math.round(
+        (Date.parse(`${dates.last_recorded_date}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000,
+      );
+      if (expected > spanDays + 1) return null;
+      if (missing > 0) {
+        if ((value.latest_gap_receipt_status !== "REJECTED" && value.latest_gap_receipt_status !== "UNKNOWN")
+          || value.latest_gap_reason === null
+          || dates.first_missing_session_date === null || dates.latest_missing_session_date === null
+          || !(start < dates.first_missing_session_date)
+          || !(dates.first_missing_session_date <= dates.latest_missing_session_date)
+          || !(dates.latest_missing_session_date < dates.last_recorded_date)
+          || (continuous > 0 && !(dates.latest_missing_session_date < dates.continuous_start_date))) return null;
+        if (value.latest_gap_receipt_status === "REJECTED"
+          && !DAILY_GAP_REJECTED_REASONS.has(value.latest_gap_reason)) return null;
+        if (value.latest_gap_receipt_status === "UNKNOWN"
+          && !(value.latest_gap_reason === "UNKNOWN" || value.latest_gap_reason === "NO_RECEIPT")) return null;
+      } else if (value.latest_gap_receipt_status !== "NO_GAP" || value.latest_gap_reason !== null
+        || dates.first_missing_session_date !== null || dates.latest_missing_session_date !== null) {
+        return null;
+      } else if (continuous !== expected || dates.continuous_start_date !== start) {
+        return null;
+      }
+    }
+  }
+  if (value.calendar_status === "UNAVAILABLE"
+    && (value.history_status !== "UNAVAILABLE"
+      || countKeys.slice(1).some((key) => value[key] !== null)
+      || dates.continuous_start_date !== null || dates.first_missing_session_date !== null
+      || dates.latest_missing_session_date !== null
+      || value.latest_gap_receipt_status !== null || value.latest_gap_reason !== null)) return null;
+  if (value.history_status === "UNAVAILABLE" && value.calendar_status !== "UNAVAILABLE") return null;
+  return { ...value };
+}
+
+// Display model for the approved in-place presentation: an L0 note fragment
+// appended to the existing return-card note plus ONE existing detail row.
+// Valuation-point counts are storage facts only — no copy promises that
+// returns become computable after N points, and no next-session date is
+// shown (the field is not in the first-release contract).
+function dailyReturnHistoryHealthView(health, hasIndependentLanes) {
+  if (health === null || health.metadata_status === "MISSING") {
+    return { note: "日终历史状态未提供 · 无法确认", detail: null };
+  }
+  if (health.metadata_status === "FAILED") {
+    return { note: "日终历史未通过校验 · 无法确认", detail: null };
+  }
+  const isolation = hasIndependentLanes
+    ? "Futu App 手工锚点与券商原生收益为独立口径，不代表系统日终历史进度" : "";
+  if (health.calendar_status === "UNAVAILABLE") {
+    // Calendar unavailable keeps the verified storage facts only; continuous
+    // points and gap counts are unknown — never rendered as 0.
+    return {
+      note: `日终历史：最近 ${health.last_recorded_date} · 已存 ${health.stored_point_count} 点 · 连续估值点未知（交易日历不可用）`,
+      detail: {
+        label: "日终历史（系统）",
+        value: `已存 ${health.stored_point_count} 点`,
+        note: `最近记录 ${health.last_recorded_date} · 交易日历不可用 · 连续估值点与缺口数量未知${isolation ? ` · ${isolation}` : ""}`,
+      },
+    };
+  }
+  if (health.history_status === "NO_HISTORY") {
+    return { note: "日终历史：尚无完整日终历史", detail: null };
+  }
+  const stored = health.stored_point_count;
+  const continuous = health.continuous_valuation_point_count;
+  const missing = health.missing_session_count;
+  const parts = [];
+  if (health.history_status === "ONE_POINT") {
+    parts.push("累计收益仍需连续估值与资金流水校验通过");
+  } else if (health.history_status === "CONTINUOUS_ZERO") {
+    parts.push("当前连续估值点为 0");
+  } else {
+    parts.push("收益显示仍以既有校验为准");
+  }
+  if (missing > 0) {
+    parts.push(`当前口径区间未存 ${missing} 个交易日 · 最近缺口 ${health.latest_missing_session_date}`);
+    if (health.latest_gap_receipt_status === "REJECTED") {
+      const reasonLabel = DAILY_GAP_REASON_LABELS[health.latest_gap_reason];
+      parts.push(`${health.latest_missing_session_date} 写入未完成 · 已证实原因：${reasonLabel || "未公开"}`);
+    } else if (health.latest_gap_reason === "NO_RECEIPT") {
+      parts.push("缺口日无写入回执");
+    } else {
+      parts.push("缺口日写入原因未记录");
+    }
+  } else {
+    parts.push("当前口径区间无缺口（已按交易日历核对）");
+  }
+  // Stored points beyond the current-scope sessions prove an account-scope
+  // change (records before the scope start are archive-only facts).
+  if (health.latest_scope_start_date !== null && stored > health.expected_session_count - missing) {
+    parts.push(`账户集合自 ${health.latest_scope_start_date} 起变更 · 连续估值口径自该日重算 · 更早记录仅作存档`);
+  }
+  if (isolation) parts.push(isolation);
+  return {
+    note: `日终历史：最近 ${health.last_recorded_date} · 连续估值 ${continuous} 点/已存 ${stored}`,
+    detail: {
+      label: "日终历史（系统）",
+      value: `连续 ${continuous} 点/已存 ${stored}`,
+      note: parts.join(" · "),
+    },
+  };
+}
+
+// CR-20261029-01: per-broker "· 系统" rows without a governed reason must
+// render an honest unknown; the EXPLICIT legit HISTORY_ACCUMULATING reason
+// explains the minimum valuation facts instead of a "recorder is writing"
+// progress claim. Mapped reasons keep their existing labels untouched.
+function systemCalculatedPendingNote(calculatedReason) {
+  if (calculatedReason === PORTFOLIO_RETURN_REASON_LABELS.HISTORY_ACCUMULATING) {
+    return "系统自算 · 累计收益仍需连续日终估值与资金流水校验通过";
+  }
+  return calculatedReason
+    ? `系统自算 · ${calculatedReason}`
+    : "系统自算 · 历史状态未提供 · 无法确认";
+}
+// CR-20261029-01 daily return history health - end
+
 function overviewMetric(label, value, note, options = {}) {
   const item = el("div", "portfolio-overview-metric");
   const labelNode = options.definition
@@ -770,11 +1071,21 @@ function renderPortfolioOverview() {
   const returnCoverage = portfolioReturn.start_date
     ? `${portfolioReturn.start_date} 起`
     : "共同历史尚未建立";
+  // CR-20261029-01: blind "历史积累中" fallbacks are retired — an absent
+  // reason code renders an honest unknown; explicit mapped reasons (including
+  // the legit HISTORY_ACCUMULATING label) keep rendering via `reason`.
   const returnNote = cumulative !== null
-    ? `累计 ${pct(cumulative, 1)} · ${returnCoverage}${annualized === null ? ` · ${reason || "历史积累中"}` : ""}`
-    : `${reason || "共同历史积累中"} · 覆盖不足不估算${referenceMissingBrokers.length
+    ? `累计 ${pct(cumulative, 1)} · ${returnCoverage}${annualized === null ? ` · ${reason || "年化条件未确认"}` : ""}`
+    : `${reason || "历史状态未提供 · 无法确认"} · 覆盖不足不估算${referenceMissingBrokers.length
       ? ` · 参考缺口：${referenceMissingBrokers.join("/")} 年化尚未满足`
       : ""}`;
+  // L0: one appended sentence on the return-card note. L1: one existing
+  // detail row. Both come from the VALIDATED health snapshot only.
+  const historyHealthView = dailyReturnHistoryHealthView(
+    portfolioHistoryHealth,
+    orderedReferenceBrokers.length > 0,
+  );
+  const historyHealthSuffix = ` · ${historyHealthView.note}`;
   const head = el("div", "portfolio-overview-head");
   append(
     head,
@@ -813,8 +1124,8 @@ function renderPortfolioOverview() {
         : "组合年化总回报",
       displayedAnnualized === null ? "—" : pct(displayedAnnualized, 1),
       annualized === null && displayedAnnualized !== null
-        ? `最近完整日终 NAV 加权参考 · NAV 权重截至 ${anchoredReference.nav_as_of || "—"} · 收益分别截至 ${referenceEndDateLabel || "—"} · 比较估算，非正式组合回报`
-        : returnNote,
+        ? `最近完整日终 NAV 加权参考 · NAV 权重截至 ${anchoredReference.nav_as_of || "—"} · 收益分别截至 ${referenceEndDateLabel || "—"} · 比较估算，非正式组合回报${historyHealthSuffix}`
+        : `${returnNote}${historyHealthSuffix}`,
       {
         definition: TERM_DEFINITIONS.portfolioTotalReturn,
         tone: displayedAnnualized === null ? "" : displayedAnnualized >= 0 ? "positive" : "negative",
@@ -874,7 +1185,7 @@ function renderPortfolioOverview() {
             else details.push({
               label: "Futu · 系统",
               value: "—",
-              note: `系统自算 · ${calculatedReason === "共同历史积累中" ? "日终历史积累中" : calculatedReason || "日终历史积累中"}`,
+              note: systemCalculatedPendingNote(calculatedReason),
             });
             return details;
           }
@@ -919,10 +1230,13 @@ function renderPortfolioOverview() {
                 : "—",
             note: calculatedCumulative !== null
               ? `系统自算 · ${calculatedReason || "满 30 个自然日后显示年化"} · ${calculated.start_date || "—"}—${calculated.end_date || "—"}`
-              : `系统自算 · ${calculatedReason === "共同历史积累中" ? "日终历史积累中" : calculatedReason || "日终历史积累中"}`,
+              : systemCalculatedPendingNote(calculatedReason),
           });
           return details;
-        }),
+        })
+        // CR-20261029-01 L1: exactly one appended detail row in the same
+        // existing structure — no new panel, no CSS, no per-broker rewrite.
+          .concat(historyHealthView.detail ? [historyHealthView.detail] : []),
       },
     ),
     overviewMetric(
@@ -1005,6 +1319,17 @@ function mergeLivePayload(payload) {
       incomingRiskGate.last_confirmed_overview,
     );
     portfolioReturnReferenceSummary = currentPortfolioReturnReferenceSummary(incomingRiskGate);
+    // CR-20261029-01: consume the actual delivered live property
+    // (personal.risk_gate.daily_return_history_health). Every SUCCESSFULLY
+    // accepted risk gate REPLACES the health snapshot with the validated
+    // current DTO: absent or poisoned metadata renders 无法确认 — never a
+    // stale implicit last-known-good, never a raw dict, never 积累中, and no
+    // monotonic newest-wins guard (the delivered snapshot IS the approved
+    // current snapshot). Transport failure or "no new payload" never reaches
+    // this line, so the last validated facts stay; locking clears as before.
+    portfolioHistoryHealth = validDailyReturnHistoryHealth(
+      incomingRiskGate.daily_return_history_health,
+    );
     monitorData.personal = applyLiveRiskGate(monitorData.personal, incomingRiskGate);
     monitorData.meta = {
       ...monitorData.meta,
@@ -4506,6 +4831,12 @@ function activateDashboard(unlocked, { persistenceRecord = null, persistenceWarn
   portfolioReturnReferenceSummary = currentPortfolioReturnReferenceSummary(
     monitorData.personal?.summary,
   );
+  // CR-20261029-01: static pages channel delivers the DTO on the risk-gate
+  // summary (personal.summary.daily_return_history_health once the transport
+  // allowlist ships it); absent/invalid stays null and renders 无法确认.
+  portfolioHistoryHealth = validDailyReturnHistoryHealth(
+    monitorData.personal?.summary?.daily_return_history_health,
+  );
   unlockKey = unlocked.key;
   unlockPersistenceRecord = persistenceRecord;
   unlockPersistenceWarning = persistenceWarning;
@@ -4538,6 +4869,7 @@ function clearUnlockedDashboard() {
   portfolioOverviewSummary = null;
   portfolioReturnReferenceSummary = null;
   portfolioReturnWeightSummary = null;
+  portfolioHistoryHealth = null;
   liveRuntime.transportStatus = LIVE_CLIENT.payloadUrl ? "EXPECTED_LAG" : "MISSING";
   liveRuntime.pollState = LIVE_CLIENT.payloadUrl ? "idle" : "disabled";
   liveRuntime.refreshState = LIVE_CLIENT.refreshUrl ? "idle" : "disabled";
