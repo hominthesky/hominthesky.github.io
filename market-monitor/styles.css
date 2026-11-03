@@ -2631,6 +2631,27 @@ footer {
 
 .strategy-hero-badges { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 
+/* CR-20261027-01: system-calculated monthly evidence lane. Scoped table
+   floor: six narrow columns (month, broker, ISO window, two percent
+   estimates, coverage) need less than the generic 700px fact-table floor,
+   so 600px keeps phone scroll proportional. Evidence dates stay whole
+   tokens that widen their column — never ellipsized — inside the locally
+   scrolling .table-wrap; the as-of line lives outside the table so the
+   evidence date is always visible without scrolling. */
+.system-periods-asof {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.system-periods-table-wrap {
+  margin: 14px 0 22px;
+}
+
+.system-periods-table-wrap table {
+  min-width: 600px;
+}
+
 .strategy-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

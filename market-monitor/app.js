@@ -4058,12 +4058,121 @@ function refreshStrategyFreshnessDisplay() {
   return true;
 }
 
+// CR-20261027-01: independent system-calculated monthly return evidence.
+// This source is decoupled from the manual strategy contract — it renders
+// from monitorData.broker_return_periods even when strategy data is missing
+// or its contract guard trips. Values are Modified Dietz ESTIMATES from
+// retained daily-close evidence: never broker-app native TWR/MWR, never
+// spliced into the native annual lanes above, never a substitute for them.
+const SYSTEM_BROKER_RETURN_PERIODS_CONTRACT = "system_broker_return_periods_v1";
+const SYSTEM_BROKER_RETURN_PERIODS_FORMULA = "broker_twr=broker_portfolio_return_v1.cumulative_total_return; broker_mwr=broker_money_weighted_return_v1.money_weighted_return";
+const SYSTEM_BROKER_RETURN_METHOD = "TWR=DAILY_CHAIN_LINKED_MODIFIED_DIETZ;MWR=INTERVAL_MODIFIED_DIETZ";
+const SYSTEM_BROKER_RETURN_COVERAGE = Object.freeze(["COMPLETE", "PARTIAL", "MISSING", "FAILED"]);
+const SYSTEM_BROKER_RETURN_BROKERS = Object.freeze(["Futu", "Tiger", "IBKR"]);
+
+// Render-side boundary of that contract (the Pages sanitizer rejects
+// invalid contracts before shipping; this is the display defense): a
+// missing/unknown root normalizes to the empty contract, rows keep only
+// schema-valid identity, and return values must be native finite numbers or
+// null — booleans and numeric strings are treated as unknown so a gap can
+// never render as 0. Missing rows keep their dates labeled as the REQUIRED
+// window, never as covered evidence.
+function normalizeSystemBrokerReturnPeriods(source) {
+  if (!source || typeof source !== "object") {
+    return { state: "EMPTY", asOf: null, rows: [] };
+  }
+  if (source.contract_id !== SYSTEM_BROKER_RETURN_PERIODS_CONTRACT
+    || source.formula !== SYSTEM_BROKER_RETURN_PERIODS_FORMULA) {
+    return { state: "CONTRACT_MISMATCH", asOf: null, rows: [] };
+  }
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  const periodPattern = /^\d{4}-\d{2}$/;
+  const finiteOrNull = (value) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+  const rows = (Array.isArray(source.rows) ? source.rows : [])
+    .filter((row) => row && typeof row === "object"
+      && periodPattern.test(row.period ?? "")
+      && SYSTEM_BROKER_RETURN_BROKERS.includes(row.broker)
+      && row.source_kind === "SYSTEM_CALCULATED"
+      && row.method === SYSTEM_BROKER_RETURN_METHOD
+      && SYSTEM_BROKER_RETURN_COVERAGE.includes(row.coverage_status))
+    .map((row) => ({
+      period: row.period,
+      broker: row.broker,
+      startDate: datePattern.test(row.start_date ?? "") ? row.start_date : null,
+      endDate: datePattern.test(row.end_date ?? "") ? row.end_date : null,
+      twr: finiteOrNull(row.twr),
+      mwr: finiteOrNull(row.mwr),
+      coverageStatus: row.coverage_status,
+      reasonCodes: Array.isArray(row.reason_codes)
+        ? row.reason_codes.filter((code) => typeof code === "string" && code) : [],
+    }))
+    .sort((left, right) => right.period.localeCompare(left.period)
+      || left.broker.localeCompare(right.broker));
+  return {
+    state: "READY",
+    asOf: datePattern.test(source.as_of ?? "") ? source.as_of : null,
+    rows,
+  };
+}
+
+function systemBrokerReturnPeriodsSection(source) {
+  const normalized = normalizeSystemBrokerReturnPeriods(source);
+  const card = section("系统计算月度收益（Modified Dietz 估算）",
+    "系统计算/Modified Dietz估算，非券商App原生TWR/MWR，不与旧月格/日级手工走势拼接。 "
+    + "逐券商按自然月独立计算：TWR 为日链 Modified Dietz，MWR 为区间 Modified Dietz；"
+    + "估值基线是上一段交易日历月的最后一个交易日日终，完整月止于当月最后交易日，当前月最多给部分窗口（MTD）。"
+    + "缺失不补零；缺失行的日期只是所需计算窗口，不代表已有证据。 ");
+  if (normalized.state === "CONTRACT_MISMATCH") {
+    card.appendChild(el("p", "empty-state", "系统月度收益契约不匹配，本区域已停止展示派生数字。"));
+    return card;
+  }
+  card.appendChild(el("p", "system-periods-asof",
+    normalized.asOf
+      ? `日终证据截至 ${normalized.asOf} · 为最新一条已记录的日终估值，不代表所有券商同日都有证据。`
+      : "尚无已记录日终证据。"));
+  if (normalized.state === "EMPTY" || !normalized.rows.length) {
+    card.appendChild(el("p", "empty-state", "日终证据积累中，暂无可计算的完整月度窗口；缺失不显示为 0。"));
+    return card;
+  }
+  const currentPeriod = strategyNyToday().slice(0, 7);
+  const coverageLabels = { COMPLETE: "完整月", MISSING: "缺失", FAILED: "失败" };
+  const displayRows = normalized.rows.map((row) => {
+    const base = row.coverageStatus === "PARTIAL"
+      ? (row.period === currentPeriod ? "部分窗口 · 本月 MTD" : "部分窗口")
+      : coverageLabels[row.coverageStatus];
+    const span = row.startDate && row.endDate ? `${row.startDate}—${row.endDate}` : null;
+    return {
+      ...row,
+      window: span
+        ? (row.coverageStatus === "COMPLETE" || row.coverageStatus === "PARTIAL"
+          ? span
+          : `需 ${span} · 待证据`)
+        : "—",
+      coverage: row.reasonCodes.length ? `${base} · ${row.reasonCodes.join("、")}` : base,
+    };
+  });
+  const wrap = table([
+    { key: "period", label: "月份" },
+    { key: "broker", label: "券商" },
+    { key: "window", label: "窗口（基线—止日）" },
+    { key: "twr", label: "TWR 估算", numeric: true, render: pct },
+    { key: "mwr", label: "MWR 估算", numeric: true, render: pct },
+    { key: "coverage", label: "覆盖与原因" },
+  ], displayRows);
+  wrap.className += " system-periods-table-wrap";
+  card.appendChild(wrap);
+  return card;
+}
+
 function renderStrategy() {
   const root = byId("strategy-content");
   root.replaceChildren();
   const data = monitorData.strategy || {};
   if (data.contract_id !== STRATEGY_ANALYSIS_CONTRACT || data.formula !== STRATEGY_ANALYSIS_FORMULA) {
     root.appendChild(el("p", "empty-state", "组合策略数据契约不匹配，已停止展示派生指标。"));
+    // The system monthly evidence source is independent of the manual
+    // strategy contract; it stays visible when the strategy guard trips.
+    root.appendChild(systemBrokerReturnPeriodsSection(monitorData.broker_return_periods));
     strategyFreshnessBadgesHost = null;
     strategyTrendCopyHost = null;
     strategyFreshnessRenderedKey = "";
@@ -4185,6 +4294,11 @@ function renderStrategy() {
   }
   root.appendChild(brokerSection);
 
+  // Independent system-calculated monthly evidence: mounted after the native
+  // per-broker cards so the estimate lane reads as its own source and never
+  // replaces or splices the native TWR/MWR lanes above.
+  root.appendChild(systemBrokerReturnPeriodsSection(monitorData.broker_return_periods));
+
   const allocation = section("当前策略结构", "三桶比例以已分类长期多头战略持仓市值为分母；现金、空头、期权和未知分类单列。 ");
   allocation.appendChild(renderStrategyAllocation(data)); root.appendChild(allocation);
 
@@ -4209,6 +4323,7 @@ function renderStrategy() {
     ["Futu 月度展示", "截图月格不可链式复原年度 TWR/MWR，因此只做走势参考。"],
     ["Tiger 月度走势", "两种来源逐行标注：日级 RoR 链式（从 2024-11-27 的真实非零起点计算）与 App 展示区间收益分列两条线，不跨来源混算或连接；App 年度值仍独立保留。"],
     ["IBKR 原生 TWR", "Flex Change in NAV 只提供 YTD 原生 TWR；当前没有受治理 MWR、年度盈亏或月度序列。"],
+    ["系统月度估算", "由留存的日终估值按自然月自动计算 Modified Dietz 估算；独立于券商 App 原生值与旧月格，缺失月显示为缺失，不补零、不拼接。"],
     ["SPY / QQQ", "当前为正常交易时段价格回报，不含分红再投资，不能称为总回报。"],
   ].forEach(([label, body]) => {
     const item = el("article", "strategy-quality-item"); append(item, el("strong", "", label), el("p", "", body)); list.appendChild(item);
