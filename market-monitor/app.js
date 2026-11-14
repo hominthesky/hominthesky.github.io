@@ -1,4 +1,5 @@
 "use strict";
+import { renderIntentIncome, selectIntentIncome, intentRiskMessage } from "./intent_income.mjs";
 
 import {
   DEFAULT_MONTHLY_TARGET_CNY,
@@ -1301,6 +1302,7 @@ function mergeLivePayload(payload) {
     liveFinancialFingerprint(normalizedLive) !== liveFinancialFingerprint(previousLive);
   monitorData.trading = {
     ...monitorData.trading,
+    intent_income: selectIntentIncome(monitorData.trading?.intent_income, incomingTrading.intent_income),
     live: normalizedLive,
     plan:
       incomingTrading.plan && typeof incomingTrading.plan === "object"
@@ -2904,6 +2906,23 @@ function livePreferenceField({ id, label, value, placeholder, storageKey, suffix
 }
 
 function renderLiveTrading(trading) {
+  if (!trading.intent_income) return renderLegacyLiveTrading(trading);
+  const region = el("div", "intent-income-region");
+  const report = renderIntentIncome(trading.intent_income);
+  const refresh = el("button", "", "立即刷新");
+  refresh.type = "button";
+  refresh.addEventListener("click", () => requestManualRefresh());
+  report.appendChild(refresh);
+  const signal = intentRiskMessage(portfolioGateInput());
+  const gate = el("div", `live-signal tone-${signal.tone}`);
+  append(gate, el("strong", "", signal.headline), el("p", "", signal.message));
+  const audit = el("details", "intent-legacy-audit");
+  append(audit, el("summary", "", "旧账审计 · FIFO 与旧主动归因"), renderLegacyLiveTrading(trading));
+  append(region, report, gate, audit);
+  return region;
+}
+
+function renderLegacyLiveTrading(trading) {
   const live = trading.live || null;
   const noActiveSession = live?.data_status === "NO_ACTIVE_SESSION";
   if (noActiveSession) {
@@ -3248,11 +3267,17 @@ function renderTrading() {
       ),
     );
   }
-  root.appendChild(settlement);
+  if (!trading.intent_income) root.appendChild(settlement);
   const liveRegion = el("div", "trading-live-region");
   liveRegion.id = "trading-live-region";
   liveRegion.appendChild(renderLiveTrading(trading));
   root.appendChild(liveRegion);
+  const historyRoot = trading.intent_income ? el("details", "intent-legacy-audit") : root;
+  if (trading.intent_income) {
+    historyRoot.appendChild(el("summary", "", "旧账历史审计 · 以下金额不进入新账目标"));
+    historyRoot.appendChild(settlement);
+    root.appendChild(historyRoot);
+  }
   const focus = periods.find((period) => period.cadence === "month") || periods[0];
   if (focus) {
     const display = periodCashflowDisplay(trading, focus);
@@ -3280,10 +3305,10 @@ function renderTrading() {
       ),
     );
     append(banner, el("div", "risk-bar"), copy);
-    root.appendChild(banner);
+    historyRoot.appendChild(banner);
   }
-  root.appendChild(renderTradingCashflowChart(trading));
-  root.appendChild(renderTradingPerformance(trading, summary));
+  historyRoot.appendChild(renderTradingCashflowChart(trading));
+  historyRoot.appendChild(renderTradingPerformance(trading, summary));
 }
 
 function universeCard(universe, action) {
