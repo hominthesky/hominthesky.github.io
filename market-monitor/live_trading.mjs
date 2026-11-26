@@ -26,12 +26,16 @@ export const DYNAMIC_DAILY_TARGET_CONFIRMED_REFERENCE_FORMULA =
   "max(monthly_target_cny - confirmed_settled_mtd_active_net_pnl_usd * usd_cny_rate, 0) / remaining_sessions_in_month";
 export const BROKER_NATIVE_RETURN_FORMULA =
   "native_interval_return; ibkr_annualized_reference=(1+native_twr)^(365/elapsed_calendar_days)-1";
+export const TRADING_CASHFLOW_LEDGER_V2_CONTRACT_ID = "trading_cashflow_ledger_v2";
+export const TRADING_CASHFLOW_LEDGER_V2_FORMULA =
+  "net_realized_cash_income=swing_net+options_net+core_realized_net+passive_net; free_cash_inflow=net_realized_cash_income+core_released_principal";
 
 const HEALTHY = "OK";
 const DEFAULT_EXPECTED_LIVE_BROKERS = ["Futu", "Tiger"];
 const ALLOWED_LIVE_BROKERS = new Set(["Futu", "Tiger", "IBKR"]);
 const PORTFOLIO_GATE_VALUES = new Set(["RED", "CLEAR"]);
 const RISK_SNAPSHOT_FIELDS = [
+  "attack_exposure_pct_nav", "attack_target_pct_nav", "maximum_theme_label", "maximum_theme_exposure_pct_nav", "snapshot_source", "is_broker_snapshot", "position_risk",
   "portfolio_gate",
   "implementation_readiness",
   "derived_nav_usd",
@@ -266,7 +270,7 @@ export function anchoredPortfolioReturnReference(summary, navWeightSummary = sum
     || (accumulationSinglePoint && calculated.start_date > anchor);
   const postAnchor = completeContinuation
     ? nativeFiniteNumber(calculated.cumulative_total_return) : 0;
-  if (manualReturn === null || postAnchor === null) return null;
+  if (manualReturn === null || postAnchor === null || manualReturn <= -1 || postAnchor <= -1) return null;
   const start = manual.start_date;
   const end = completeContinuation ? calculated.end_date : anchor;
   const elapsed = start && end
@@ -505,6 +509,7 @@ export function buildCashflowChartSeries(
     sourcesComplete = false,
     scopeStart = null,
     scopeEnd = null,
+    periods = [],
   } = {},
 ) {
   if (!new Set(["day", "week", "month", "year"]).has(cadence)) return [];
@@ -512,6 +517,26 @@ export function buildCashflowChartSeries(
   const scopedRows = cadence === "year"
     ? rowsWithinYearCoverage(rows, yearPeriod)
     : [...(rows || [])];
+  // A certified zero period is data. It can be absent from the sparse daily
+  // event series, but must never be inferred from missing rows alone.
+  const provenZero = (period) => period?.coverage_status === "COMPLETE"
+    && period.realized_coverage_status === "COMPLETE"
+    && period.active_scope_coverage_status === "COMPLETE"
+    && period.dividend_coverage_status === "COMPLETE"
+    && period.interest_coverage_status === "COMPLETE"
+    && nativeFiniteNumber(period.closed_trades) === 0
+    && ["generated_cashflow", "account_interest_cashflow", "living_expense_net_cashflow"]
+      .every((key) => nativeFiniteNumber(period[key]) === 0);
+  const zeroPeriod = (Array.isArray(periods) ? periods : []).find(period => period?.cadence === cadence && provenZero(period));
+  const certifiedYearOnly = cadence === "year" && sourcesComplete && zeroPeriod
+    && zeroPeriod.start_date === yearPeriod?.start_date && zeroPeriod.end_date === yearPeriod?.end_date
+    && scopedRows.every(provenZero);
+  const needsZeroPoint = !scopedRows.length || ((cadence === "day" || certifiedYearOnly)
+    && !scopedRows.some(row => row?.date === zeroPeriod?.end_date));
+  if (needsZeroPoint && sourcesComplete && zeroPeriod
+    && /^\d{4}-\d{2}-\d{2}$/.test(String(zeroPeriod.end_date || ""))) {
+    scopedRows.push({ ...zeroPeriod, date: zeroPeriod.end_date });
+  }
   const ordered = scopedRows
     .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(String(row?.date || "")))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
@@ -601,7 +626,12 @@ export function buildCashflowChartSeries(
     interestComplete: true,
     livingComplete: true,
   };
-  return series.map((row) => {
+  return series.map((row, index) => {
+    // A whole-year proof certifies the final cumulative point. Interior months
+    // without daily evidence stay unknown even when the year nets to zero.
+    if (certifiedYearOnly && index === series.length - 1) return {
+      ...row, fullLabel: `${row.fullLabel} ${yearSeriesScope(yearPeriod, yearComplete) || ""}`.trim(),
+    };
     Object.keys(cumulative).forEach((key) => {
       if (cumulative[key] !== null && row[key] !== null) cumulative[key] += row[key];
       else cumulative[key] = null;
@@ -729,6 +759,7 @@ export function applyLiveRiskGate(personal, incoming) {
   }
   return {
     ...current,
+    source_status: nextSummary.source_status,
     summary: {
       ...nextSummary,
       portfolio_return: current.summary?.portfolio_return,
@@ -1871,4 +1902,800 @@ export function refreshProofMessage(challenge, requestPath) {
     throw new TypeError("Invalid refresh challenge contract");
   }
   return `POST\n${requestPath}\n${challenge.nonce}\n${challenge.expires_at}`;
+}
+
+const LEDGER_V2_COVERAGE_STATES = new Set(["COMPLETE", "PARTIAL", "MISSING"]);
+const LEDGER_V2_WARNING_RE = /^[A-Z0-9_]{1,64}$/;
+const LEDGER_V2_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const PRIVATE_LEDGER_BROKERS = new Set(["Futu", "Tiger", "IBKR"]);
+const PRIVATE_LEDGER_EVENT_KINDS = new Set(["SWING", "CORE", "OPTION", "CASHFLOW"]);
+const PRIVATE_LEDGER_INTENTS = new Set([
+  "SWING_ATTACHED",
+  "SWING_NEARBY",
+  "SWING_SHORT_COVER",
+  "CORE",
+  "MIXED",
+  "OPTION_CLOSE",
+  "OPTION_EXPIRATION",
+  "OPTION_ASSIGNMENT",
+  "OPTION_EXERCISE",
+  "OVERRIDE_CORE",
+  "OVERRIDE_SWING",
+  "DIVIDEND",
+  "DIVIDEND_TAX",
+  "PTP_WITHHOLDING",
+  "BROKER_FEE",
+  "INTEREST",
+]);
+const PRIVATE_LEDGER_OVERRIDE_ACTIONS = new Set(["SET_CORE", "SET_SWING", "CLEAR"]);
+const PRIVATE_LEDGER_SAFE_ID_RE = /^[A-Za-z0-9._:@|+-](?:[A-Za-z0-9._:@|+ -]{0,158}[A-Za-z0-9._:@|+-])?$/;
+const PRIVATE_LEDGER_SAFE_SYMBOL_RE = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,31}$/;
+
+function ledgerFiniteNumber(value, minimum = null) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (minimum !== null && value < minimum) return null;
+  return value;
+}
+
+function ledgerNonNegativeInt(value) {
+  if (value === null || value === undefined) return null;
+  return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function ledgerSafeDate(value) {
+  return typeof value === "string" && LEDGER_V2_DATE_RE.test(value) ? value : null;
+}
+
+function ledgerCoverage(value, fallback = "MISSING") {
+  const normalized = String(value || fallback).toUpperCase();
+  return LEDGER_V2_COVERAGE_STATES.has(normalized) ? normalized : fallback;
+}
+
+function ledgerNumericFields(source, keys, intKeys = new Set()) {
+  if (!source || typeof source !== "object" || Array.isArray(source)) return {};
+  const out = {};
+  for (const key of keys) {
+    if (!Object.hasOwn(source, key)) continue;
+    const raw = source[key];
+    if (raw === null) {
+      out[key] = null;
+    } else if (intKeys.has(key)) {
+      const n = ledgerNonNegativeInt(raw);
+      if (n !== null) out[key] = n;
+    } else {
+      const n = ledgerFiniteNumber(raw);
+      if (n !== null) out[key] = n;
+    }
+  }
+  return out;
+}
+
+function ledgerWarningCodes(raw) {
+  return Array.isArray(raw)
+    ? [...new Set(raw.filter((item) => typeof item === "string" && LEDGER_V2_WARNING_RE.test(item)))]
+    : [];
+}
+
+function sanitizeLedgerV2Bucket(bucket, { includeDate = false } = {}) {
+  if (!bucket || typeof bucket !== "object" || Array.isArray(bucket) || Object.keys(bucket).length === 0) return {};
+  const coreRaw = bucket.core && typeof bucket.core === "object" && !Array.isArray(bucket.core)
+    ? bucket.core
+    : {};
+  const core = ledgerNumericFields(
+    coreRaw,
+    [
+      "trades",
+      "sell_fees_usd",
+      "realized_net_profit_usd",
+      "released_principal_usd",
+      "total_cash_inflow_usd",
+      "total_cash_inflow_cny",
+    ],
+    new Set(["trades"]),
+  );
+  core.cost_baseline_status = String(coreRaw.cost_baseline_status || "").toUpperCase() === "COMPLETE"
+    ? "COMPLETE"
+    : "MISSING";
+
+  const out = {
+    start_date: ledgerSafeDate(bucket.start_date),
+    end_date: ledgerSafeDate(bucket.end_date),
+    coverage_status: ledgerCoverage(bucket.coverage_status),
+    swing: ledgerNumericFields(
+      bucket.swing,
+      ["trades", "wins", "losses", "win_rate", "gross_pnl_usd", "fees_usd", "net_pnl_usd", "net_pnl_cny"],
+      new Set(["trades", "wins", "losses"]),
+    ),
+    options: ledgerNumericFields(
+      bucket.options,
+      ["trades", "gross_pnl_usd", "fees_usd", "net_pnl_usd", "net_pnl_cny"],
+      new Set(["trades"]),
+    ),
+    core,
+    passive: ledgerNumericFields(bucket.passive, [
+      "gross_dividend_usd",
+      "dividend_tax_usd",
+      "ptp_withholding_usd",
+      "net_dividend_usd",
+      "broker_fee_usd",
+      "interest_usd",
+      "passive_net_usd",
+      "passive_net_cny",
+      "accrued_interest_reference_usd",
+    ]),
+    funnel: ledgerNumericFields(bucket.funnel, [
+      "net_realized_cash_income_usd",
+      "net_realized_cash_income_cny",
+      "free_cash_inflow_usd",
+      "free_cash_inflow_cny",
+      "personal_tax_reserve_usd",
+      "sell_proceeds_usd",
+    ]),
+    monthly_living_target: ledgerNumericFields(bucket.monthly_living_target, [
+      "target_cny",
+      "covered_cny",
+      "gap_cny",
+      "coverage_ratio",
+    ]),
+    warning_codes: ledgerWarningCodes(bucket.warning_codes),
+  };
+
+  if (includeDate && ledgerSafeDate(bucket.date)) out.date = ledgerSafeDate(bucket.date);
+  if (ledgerSafeDate(bucket.monitoring_day)) out.monitoring_day = ledgerSafeDate(bucket.monitoring_day);
+  if (ledgerSafeDate(bucket.settled_through)) out.settled_through = ledgerSafeDate(bucket.settled_through);
+  if (bucket.withdrawal_safety && typeof bucket.withdrawal_safety === "object" && !Array.isArray(bucket.withdrawal_safety)) {
+    const ws = bucket.withdrawal_safety;
+    out.withdrawal_safety = {
+      cash_coverage_status: String(ws.cash_coverage_status || "").toUpperCase() === "COMPLETE"
+        ? "COMPLETE"
+        : "MISSING",
+      total_usd_cash: ledgerFiniteNumber(ws.total_usd_cash),
+      t_plus_1_unsettled_usd: ledgerFiniteNumber(ws.t_plus_1_unsettled_usd),
+      settled_withdrawable_usd: ledgerFiniteNumber(ws.settled_withdrawable_usd),
+      margin_deficit_alert: Boolean(ws.margin_deficit_alert),
+    };
+  }
+  return out;
+}
+
+/**
+ * Strict aggregate-only allowlist for public `cashflow_ledger_v2` payloads.
+ * Never passes through fills, per-trade prices, matched lots, overrides, or account aliases.
+ */
+export function sanitizeCashflowLedgerV2(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (value.contract_id !== "trading_cashflow_ledger_v2") return null;
+  const rawPeriods = value.periods;
+  if (!rawPeriods || typeof rawPeriods !== "object" || Array.isArray(rawPeriods)) return null;
+  const periods = {};
+  for (const cadence of ["day", "week", "month", "year"]) {
+    const bucket = rawPeriods[cadence];
+    if (bucket && typeof bucket === "object" && !Array.isArray(bucket)) {
+      periods[cadence] = sanitizeLedgerV2Bucket(bucket);
+    }
+  }
+  const daily = Array.isArray(value.daily)
+    ? value.daily
+        .slice(-400)
+        .filter((row) => row && typeof row === "object" && !Array.isArray(row))
+        .map((row) => sanitizeLedgerV2Bucket(row, { includeDate: true }))
+    : [];
+  const out = {
+    contract_id: "trading_cashflow_ledger_v2",
+    engine: "v2",
+    ledger_start: ledgerSafeDate(value.ledger_start),
+    settled_through: ledgerSafeDate(value.settled_through),
+    coverage_status: ledgerCoverage(value.coverage_status),
+    periods,
+    live: sanitizeLedgerV2Bucket(value.live),
+    daily,
+    warning_codes: ledgerWarningCodes(value.warning_codes),
+  };
+  if (value.fx && typeof value.fx === "object" && !Array.isArray(value.fx)) {
+    const rawFx = value.fx;
+    const rawRate = ledgerFiniteNumber(rawFx.usd_cny_rate);
+    const fxStatus = String(rawFx.usd_cny_status || "MISSING").toUpperCase();
+    const safeSource = typeof rawFx.usd_cny_source === "string" && /^[A-Za-z0-9_.-]{1,32}$/.test(rawFx.usd_cny_source)
+      ? rawFx.usd_cny_source
+      : "DEXCHUS";
+    out.fx = {
+      usd_cny_rate: rawRate !== null && rawRate > 0 ? Math.round(rawRate * 10000) / 10000 : null,
+      usd_cny_as_of: ledgerSafeDate(rawFx.usd_cny_as_of),
+      usd_cny_source: safeSource,
+      usd_cny_status: ["OK", "EXPECTED_LAG", "STALE", "FAILED", "MISSING"].includes(fxStatus) ? fxStatus : "MISSING",
+      fx_stale: Boolean(rawFx.fx_stale),
+      fx_age_business_days: ledgerNonNegativeInt(rawFx.fx_age_business_days),
+    };
+  }
+  return out;
+}
+
+function safePrivateId(value, maxLen = 160) {
+  if (typeof value !== "string" || !value || value.length > maxLen) return "";
+  if (value.includes("..") || value.includes("/") || value.includes("\\")) return "";
+  return PRIVATE_LEDGER_SAFE_ID_RE.test(value) ? value : "";
+}
+
+/**
+ * Client-side strict allowlist validator for authenticated `POST /v1/trading/ledger` responses.
+ */
+export function sanitizePrivateTradingLedgerClient(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new TypeError("私有逐笔账本数据格式无效");
+  }
+  if (payload.contract_id !== "private_trading_ledger_v1" || String(payload.engine || "").toLowerCase() !== "v2") {
+    throw new TypeError("私有逐笔账本契约不受支持");
+  }
+  if (!Array.isArray(payload.events)) {
+    throw new TypeError("私有逐笔账本缺少成交列表");
+  }
+  const coverageStatus = ledgerCoverage(payload.coverage_status, "INVALID");
+  if (!LEDGER_V2_COVERAGE_STATES.has(coverageStatus)) {
+    throw new TypeError("私有逐笔账本覆盖状态无效");
+  }
+  const events = payload.events.map((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new TypeError("私有逐笔记录格式无效");
+    }
+    const eventId = safePrivateId(row.event_id, 160);
+    const monitoringDay = ledgerSafeDate(row.monitoring_day);
+    const occurredAt = typeof row.occurred_at === "string" ? row.occurred_at : "";
+    const broker = PRIVATE_LEDGER_BROKERS.has(row.broker) ? row.broker : "";
+    const symbol = typeof row.symbol === "string" && PRIVATE_LEDGER_SAFE_SYMBOL_RE.test(row.symbol) && !row.symbol.includes("..")
+      ? row.symbol
+      : "";
+    const eventKind = String(row.event_kind || "").toUpperCase();
+    const intent = String(row.intent || "").toUpperCase();
+    if (!eventId || !monitoringDay || !occurredAt || !broker || !symbol
+      || !PRIVATE_LEDGER_EVENT_KINDS.has(eventKind) || !PRIVATE_LEDGER_INTENTS.has(intent)) {
+      throw new TypeError("私有逐笔记录包含非法标识字段");
+    }
+    const matchedLots = Array.isArray(row.matched_lots)
+      ? row.matched_lots.map((lot) => {
+          const buyFillId = safePrivateId(lot?.buy_fill_id, 128);
+          const buyPrice = ledgerFiniteNumber(lot?.buy_price, 0);
+          const matchedQty = ledgerFiniteNumber(lot?.matched_qty, 0);
+          const allocBuyFee = ledgerFiniteNumber(lot?.alloc_buy_fee);
+          if (!buyFillId || buyPrice === null || matchedQty === null || allocBuyFee === null) {
+            throw new TypeError("配对买入批次字段无效");
+          }
+          const buyOrderId = lot?.buy_order_id ? safePrivateId(lot.buy_order_id, 128) : "";
+          return {
+            buy_fill_id: buyFillId,
+            ...(buyOrderId ? { buy_order_id: buyOrderId } : {}),
+            buy_time: typeof lot?.buy_time === "string" ? lot.buy_time : null,
+            buy_price: buyPrice,
+            matched_qty: matchedQty,
+            alloc_buy_fee: allocBuyFee,
+          };
+        })
+      : [];
+    return {
+      event_id: eventId,
+      monitoring_day: monitoringDay,
+      occurred_at: occurredAt,
+      broker,
+      symbol,
+      event_kind: eventKind,
+      intent,
+      qty: ledgerFiniteNumber(row.qty, 0),
+      sell_price: ledgerFiniteNumber(row.sell_price, 0),
+      matched_lots: matchedLots,
+      sell_fees: ledgerFiniteNumber(row.sell_fees),
+      buy_fees: ledgerFiniteNumber(row.buy_fees),
+      realized_net_profit: ledgerFiniteNumber(row.realized_net_profit),
+      released_principal: ledgerFiniteNumber(row.released_principal),
+      cashflow_inflow: ledgerFiniteNumber(row.cashflow_inflow),
+      warning_codes: ledgerWarningCodes(row.warning_codes),
+    };
+  });
+  const overrides = Array.isArray(payload.overrides)
+    ? payload.overrides
+        .filter((item) => item && typeof item === "object" && !Array.isArray(item))
+        .map((item) => {
+          const action = String(item.action || "").toUpperCase();
+          const sellFillId = safePrivateId(item.sell_fill_id, 128);
+          if (!PRIVATE_LEDGER_OVERRIDE_ACTIONS.has(action) || !sellFillId) return null;
+          const targetBuyFillId = item.target_buy_fill_id ? safePrivateId(item.target_buy_fill_id, 128) : null;
+          return {
+            sell_fill_id: sellFillId,
+            action,
+            target_buy_fill_id: targetBuyFillId || null,
+            broker: PRIVATE_LEDGER_BROKERS.has(item.broker) ? item.broker : null,
+            note: typeof item.note === "string" ? item.note.slice(0, 200) : null,
+            updated_at: typeof item.updated_at === "string" ? item.updated_at : null,
+          };
+        })
+        .filter(Boolean)
+    : [];
+  const sliceRaw = payload.slice && typeof payload.slice === "object" && !Array.isArray(payload.slice)
+    ? payload.slice
+    : null;
+  return {
+    contract_id: "private_trading_ledger_v1",
+    generated_at: typeof payload.generated_at === "string" ? payload.generated_at : "",
+    source_retrieved_at: typeof payload.source_retrieved_at === "string" ? payload.source_retrieved_at : "",
+    settled_through: ledgerSafeDate(payload.settled_through) || "",
+    coverage_status: coverageStatus,
+    engine: "v2",
+    events,
+    overrides_count: overrides.length,
+    overrides,
+    warning_codes: ledgerWarningCodes(payload.warning_codes),
+    ...(sliceRaw
+      ? {
+          slice: {
+            period: typeof sliceRaw.period === "string" ? sliceRaw.period : "",
+            start_day: ledgerSafeDate(sliceRaw.start_day) || "",
+            end_day: ledgerSafeDate(sliceRaw.end_day) || "",
+            total_events: ledgerNonNegativeInt(sliceRaw.total_events) ?? events.length,
+            returned_events: ledgerNonNegativeInt(sliceRaw.returned_events) ?? events.length,
+          },
+        }
+      : {}),
+  };
+}
+
+function buildTrendSeriesFromDaily(dailyRows, cadence, liveBucket = null, dayMode = "live") {
+  const safeRows = Array.isArray(dailyRows) ? dailyRows.filter((row) => ledgerSafeDate(row?.date || row?.monitoring_day)) : [];
+  if (cadence === "day") {
+    const base = safeRows.slice(-30).map((row) => {
+      const complete = row.coverage_status === "COMPLETE";
+      const net = complete ? ledgerFiniteNumber(row.funnel?.net_realized_cash_income_usd) : null;
+      const free = complete ? ledgerFiniteNumber(row.funnel?.free_cash_inflow_usd) : null;
+      const swing = ledgerFiniteNumber(row.swing?.net_pnl_usd);
+      const opt = ledgerFiniteNumber(row.options?.net_pnl_usd);
+      const passive = ledgerFiniteNumber(row.passive?.passive_net_usd);
+      const tradingUsd = complete && (swing !== null || opt !== null)
+        ? (swing ?? 0) + (opt ?? 0)
+        : null;
+      const dateStr = row.date || row.monitoring_day;
+      return {
+        label: dateStr.slice(5),
+        date: dateStr,
+        netIncomeUsd: net,
+        tradingUsd,
+        passiveUsd: complete ? passive : null,
+        freeInflowUsd: free,
+        complete,
+        provisional: false,
+      };
+    });
+    const liveDay = ledgerSafeDate(liveBucket?.monitoring_day || liveBucket?.end_date);
+    if (dayMode === "live" && liveDay && liveBucket?.funnel && base.at(-1)?.date !== liveDay) {
+      const net = ledgerFiniteNumber(liveBucket.funnel.net_realized_cash_income_usd);
+      const free = ledgerFiniteNumber(liveBucket.funnel.free_cash_inflow_usd);
+      const swing = ledgerFiniteNumber(liveBucket.swing?.net_pnl_usd);
+      const opt = ledgerFiniteNumber(liveBucket.options?.net_pnl_usd);
+      const passive = ledgerFiniteNumber(liveBucket.passive?.passive_net_usd);
+      if (net !== null || free !== null) {
+        base.push({
+          label: `${liveDay.slice(5)} 盘中`,
+          date: liveDay,
+          netIncomeUsd: net,
+          tradingUsd: swing !== null || opt !== null ? (swing ?? 0) + (opt ?? 0) : null,
+          passiveUsd: passive,
+          freeInflowUsd: free,
+          complete: false,
+          provisional: true,
+        });
+      }
+    }
+    return base.slice(-30);
+  }
+  const groupKeyForDate = (dateStr) => {
+    if (cadence === "week") {
+      const [y, m, d] = dateStr.split("-").map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      const day = dt.getUTCDay() || 7;
+      dt.setUTCDate(dt.getUTCDate() - day + 1);
+      return dt.toISOString().slice(0, 10);
+    }
+    return dateStr.slice(0, 7);
+  };
+  const anchorYear = (safeRows.at(-1)?.date || "").slice(0, 4);
+  const filteredRows = cadence === "year" && anchorYear
+    ? safeRows.filter((row) => (row.date || "").startsWith(anchorYear))
+    : safeRows;
+  const groups = new Map();
+  for (const row of filteredRows) {
+    const dateStr = row.date || row.monitoring_day;
+    const key = groupKeyForDate(dateStr);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        complete: true,
+        netSum: 0,
+        tradingSum: 0,
+        passiveSum: 0,
+        freeSum: 0,
+        hasNet: false,
+        hasTrading: false,
+        hasPassive: false,
+      });
+    }
+    const g = groups.get(key);
+    const complete = row.coverage_status === "COMPLETE";
+    const net = ledgerFiniteNumber(row.funnel?.net_realized_cash_income_usd);
+    const free = ledgerFiniteNumber(row.funnel?.free_cash_inflow_usd);
+    const swing = ledgerFiniteNumber(row.swing?.net_pnl_usd);
+    const opt = ledgerFiniteNumber(row.options?.net_pnl_usd);
+    const passive = ledgerFiniteNumber(row.passive?.passive_net_usd);
+    if (!complete || net === null) {
+      g.complete = false;
+    } else {
+      g.netSum += net;
+      g.hasNet = true;
+      g.freeSum += free ?? net;
+    }
+    if (swing !== null || opt !== null) {
+      g.tradingSum += (swing ?? 0) + (opt ?? 0);
+      g.hasTrading = true;
+    }
+    if (passive !== null) {
+      g.passiveSum += passive;
+      g.hasPassive = true;
+    }
+  }
+  const sorted = [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
+  const sliced = cadence === "week" ? sorted.slice(-16) : sorted.slice(-12);
+  if (cadence === "year") {
+    let runningNet = 0;
+    let runningFree = 0;
+    let broken = false;
+    return sliced.map((g) => {
+      if (!g.complete || !g.hasNet || broken) {
+        broken = true;
+        return {
+          label: `${g.key.slice(5)}月`,
+          date: g.key,
+          netIncomeUsd: null,
+          tradingUsd: g.hasTrading ? g.tradingSum : null,
+          passiveUsd: g.hasPassive ? g.passiveSum : null,
+          freeInflowUsd: null,
+          complete: false,
+          provisional: false,
+        };
+      }
+      runningNet += g.netSum;
+      runningFree += g.freeSum;
+      return {
+        label: `${g.key.slice(5)}月`,
+        date: g.key,
+        netIncomeUsd: runningNet,
+        tradingUsd: g.hasTrading ? g.tradingSum : null,
+        passiveUsd: g.hasPassive ? g.passiveSum : null,
+        freeInflowUsd: runningFree,
+        complete: true,
+        provisional: false,
+      };
+    });
+  }
+  return sliced.map((g) => ({
+    label: cadence === "week" ? g.key.slice(5) : `${g.key.slice(5)}月`,
+    date: g.key,
+    netIncomeUsd: g.complete && g.hasNet ? g.netSum : null,
+    tradingUsd: g.complete && g.hasTrading ? g.tradingSum : null,
+    passiveUsd: g.complete && g.hasPassive ? g.passiveSum : null,
+    freeInflowUsd: g.complete && g.hasNet ? g.freeSum : null,
+    complete: g.complete && g.hasNet,
+    provisional: false,
+  }));
+}
+
+/**
+ * Normalizes `cashflow_ledger_v2` (primary) or legacy `trading` aggregates into one
+ * uniform 4-layer view model consumed by the Trading Review UI.
+ */
+export function adaptTradingReviewModel({
+  trading = {},
+  meta = {},
+  cadence = "day",
+  dayMode = "live",
+  usdCnyRate = null,
+  targetOverrideCny = null,
+} = {}) {
+  const safeCadence = ["day", "week", "month", "year"].includes(cadence) ? cadence : "day";
+  const safeDayMode = dayMode === "settled" ? "settled" : "live";
+  const v2 = sanitizeCashflowLedgerV2(trading?.cashflow_ledger_v2);
+  const resolvedTargetCny =
+    ledgerFiniteNumber(targetOverrideCny) > 0
+      ? ledgerFiniteNumber(targetOverrideCny)
+      : ledgerFiniteNumber(v2?.periods?.month?.monthly_living_target?.target_cny)
+        ?? ledgerFiniteNumber(trading?.plan?.monthly_target_cny)
+        ?? DEFAULT_MONTHLY_TARGET_CNY;
+
+  const fxSource = v2?.fx || {};
+  const fxRate = ledgerFiniteNumber(usdCnyRate) ?? ledgerFiniteNumber(fxSource.usd_cny_rate) ?? ledgerFiniteNumber(meta?.usd_cny_rate);
+  const fxAsOf = fxSource.usd_cny_as_of || meta?.usd_cny_as_of || null;
+  const fxStatus = fxSource.usd_cny_status || meta?.usd_cny_status || (fxRate ? "OK" : "MISSING");
+  const fxStale = Boolean(
+    fxSource.fx_stale ||
+      meta?.fx_stale ||
+      fxStatus === "STALE" ||
+      fxStatus === "MISSING" ||
+      fxStatus === "FAILED",
+  );
+  const sources = Array.isArray(trading?.sources) ? trading.sources : [];
+  const warningCodes = new Set(v2?.warning_codes || []);
+
+  if (v2) {
+    const liveBucket = v2.live && Object.keys(v2.live).length > 0 && (v2.live.coverage_status || v2.live.funnel || v2.live.withdrawal_safety)
+      ? v2.live
+      : null;
+    const periodBucket = v2.periods?.[safeCadence] || {};
+    const activeBucket = safeCadence === "day" && safeDayMode === "live" && liveBucket
+      ? liveBucket
+      : periodBucket;
+    const isIntradayLive = Boolean(safeCadence === "day" && safeDayMode === "live" && liveBucket);
+    const bucketWarnings = ledgerWarningCodes(activeBucket?.warning_codes);
+    bucketWarnings.forEach((c) => warningCodes.add(c));
+
+    const coverageStatus = ledgerCoverage(activeBucket?.coverage_status || v2.coverage_status);
+    const funnel = activeBucket?.funnel || {};
+    const netUsd = ledgerFiniteNumber(funnel.net_realized_cash_income_usd);
+    const netCny = netUsd !== null && fxRate ? netUsd * fxRate : ledgerFiniteNumber(funnel.net_realized_cash_income_cny);
+    const freeUsd = ledgerFiniteNumber(funnel.free_cash_inflow_usd);
+    const freeCny = freeUsd !== null && fxRate ? freeUsd * fxRate : ledgerFiniteNumber(funnel.free_cash_inflow_cny);
+    const core = activeBucket?.core || {};
+    const swing = activeBucket?.swing || {};
+    const options = activeBucket?.options || {};
+    const passive = activeBucket?.passive || {};
+
+    const monthBucket = v2.periods?.month || {};
+    const monthNetUsd = ledgerFiniteNumber(monthBucket?.funnel?.net_realized_cash_income_usd);
+    const bucketLivingTarget = activeBucket?.monthly_living_target || {};
+    const monthLivingTarget = monthBucket?.monthly_living_target || bucketLivingTarget;
+    const targetBaselineUsd = safeCadence === "month"
+      ? netUsd
+      : (monthNetUsd ?? ledgerFiniteNumber(monthLivingTarget?.covered_cny && fxRate ? monthLivingTarget.covered_cny / fxRate : null));
+    const coveredCny =
+      targetBaselineUsd !== null && fxRate
+        ? targetBaselineUsd * fxRate
+        : ledgerFiniteNumber(monthLivingTarget?.covered_cny ?? bucketLivingTarget?.covered_cny);
+    const coveredPositiveCny = coveredCny !== null ? Math.max(coveredCny, 0) : null;
+    const gapCny = coveredPositiveCny !== null ? Math.max(resolvedTargetCny - coveredPositiveCny, 0) : null;
+    const coverageRatio = coveredPositiveCny !== null && resolvedTargetCny > 0
+      ? coveredPositiveCny / resolvedTargetCny
+      : null;
+
+    const wsRaw = liveBucket?.withdrawal_safety || activeBucket?.withdrawal_safety || v2.periods?.day?.withdrawal_safety || null;
+    const withdrawalSafety = wsRaw
+      ? {
+          available: wsRaw.cash_coverage_status === "COMPLETE",
+          cashCoverageStatus: wsRaw.cash_coverage_status || "MISSING",
+          totalUsdCash: ledgerFiniteNumber(wsRaw.total_usd_cash),
+          tPlus1UnsettledUsd: ledgerFiniteNumber(wsRaw.t_plus_1_unsettled_usd),
+          settledWithdrawableUsd: ledgerFiniteNumber(wsRaw.settled_withdrawable_usd),
+          marginDeficitAlert: Boolean(wsRaw.margin_deficit_alert),
+        }
+      : {
+          available: false,
+          cashCoverageStatus: "MISSING",
+          totalUsdCash: null,
+          tPlus1UnsettledUsd: null,
+          settledWithdrawableUsd: null,
+          marginDeficitAlert: false,
+        };
+
+    const healthReasons = [];
+    if (fxStale) healthReasons.push("汇率数据滞后或缺失");
+    if (coverageStatus !== "COMPLETE") healthReasons.push(coverageStatus === "PARTIAL" ? "部分统计窗口待补齐" : "统计数据缺失");
+    const nonOkBrokers = sources.filter((s) => String(s?.status || "MISSING").toUpperCase() !== "OK");
+    if (nonOkBrokers.length > 0) {
+      healthReasons.push(`${nonOkBrokers.map((b) => b.broker || b.source || "券商").join(" / ")} 状态待核对`);
+    }
+    if (withdrawalSafety.marginDeficitAlert) healthReasons.push("账户存在融资利息风险提示");
+
+    return {
+      engine: "v2",
+      cadence: safeCadence,
+      dayMode: safeDayMode,
+      isIntradayLive,
+      hasIntradayLive: Boolean(liveBucket),
+      settledThrough: v2.settled_through || trading?.meta?.settled_through || null,
+      monitoringDay: activeBucket?.monitoring_day || activeBucket?.end_date || v2.settled_through || null,
+      startDate: activeBucket?.start_date || null,
+      endDate: activeBucket?.end_date || null,
+      coverageStatus,
+      fxRate,
+      fxAsOf,
+      fxStatus,
+      fxStale,
+      sources,
+      warningCodes: [...warningCodes],
+      healthReasons,
+      hero: {
+        netRealizedCashIncomeUsd: netUsd,
+        netRealizedCashIncomeCny: netCny,
+        freeCashInflowUsd: freeUsd,
+        freeCashInflowCny: freeCny,
+        releasedPrincipalUsd: ledgerFiniteNumber(core.released_principal_usd),
+        personalTaxReserveUsd: ledgerFiniteNumber(funnel.personal_tax_reserve_usd) ?? 0,
+        sellProceedsUsd: ledgerFiniteNumber(funnel.sell_proceeds_usd),
+        isComplete: coverageStatus === "COMPLETE",
+        withdrawalSafety,
+        monthlyTarget: {
+          targetCny: resolvedTargetCny,
+          coveredCny,
+          gapCny,
+          coverageRatio,
+          isMonthReference: safeCadence !== "month",
+          referenceLabel: safeCadence === "month" ? "本月目标达成" : "本月生活目标参考进度",
+        },
+      },
+      pillars: {
+        swing: {
+          available: Object.keys(swing).length > 0,
+          trades: ledgerNonNegativeInt(swing.trades),
+          wins: ledgerNonNegativeInt(swing.wins),
+          losses: ledgerNonNegativeInt(swing.losses),
+          winRate: ledgerFiniteNumber(swing.win_rate),
+          grossPnlUsd: ledgerFiniteNumber(swing.gross_pnl_usd),
+          feesUsd: ledgerFiniteNumber(swing.fees_usd),
+          netPnlUsd: ledgerFiniteNumber(swing.net_pnl_usd),
+        },
+        options: {
+          available: Object.keys(options).length > 0,
+          trades: ledgerNonNegativeInt(options.trades),
+          grossPnlUsd: ledgerFiniteNumber(options.gross_pnl_usd),
+          feesUsd: ledgerFiniteNumber(options.fees_usd),
+          netPnlUsd: ledgerFiniteNumber(options.net_pnl_usd),
+        },
+        core: {
+          available: Object.keys(core).length > 0,
+          trades: ledgerNonNegativeInt(core.trades),
+          sellFeesUsd: ledgerFiniteNumber(core.sell_fees_usd),
+          realizedNetProfitUsd: ledgerFiniteNumber(core.realized_net_profit_usd),
+          releasedPrincipalUsd: ledgerFiniteNumber(core.released_principal_usd),
+          totalCashInflowUsd: ledgerFiniteNumber(core.total_cash_inflow_usd),
+          costBaselineStatus: core.cost_baseline_status || "MISSING",
+        },
+        passive: {
+          available: Object.keys(passive).length > 0,
+          grossDividendUsd: ledgerFiniteNumber(passive.gross_dividend_usd),
+          dividendTaxUsd: ledgerFiniteNumber(passive.dividend_tax_usd),
+          ptpWithholdingUsd: ledgerFiniteNumber(passive.ptp_withholding_usd),
+          netDividendUsd: ledgerFiniteNumber(passive.net_dividend_usd),
+          brokerFeeUsd: ledgerFiniteNumber(passive.broker_fee_usd),
+          interestUsd: ledgerFiniteNumber(passive.interest_usd),
+          passiveNetUsd: ledgerFiniteNumber(passive.passive_net_usd),
+          accruedInterestReferenceUsd: ledgerFiniteNumber(passive.accrued_interest_reference_usd),
+        },
+      },
+      trend: buildTrendSeriesFromDaily(v2.daily, safeCadence, liveBucket, safeDayMode),
+    };
+  }
+
+  // Legacy fallback adaptation (no v2 ledger in payload): never invent zero or mix core principal
+  const legacyLive = trading?.live || {};
+  const legacyPeriods = Array.isArray(trading?.periods) ? trading.periods : [];
+  const legacyPeriod = legacyPeriods.find((p) => p?.cadence === safeCadence) || {};
+  const legacyMonth = legacyPeriods.find((p) => p?.cadence === "month") || {};
+  const useLive = safeCadence === "day" && safeDayMode === "live" && trading?.live;
+  const legacyCash = useLive ? resolveLiveCashflowDisplay(legacyLive) : resolvePeriodCashflowDisplay(trading, legacyPeriod);
+  const netUsd = useLive ? legacyCash.value : (legacyCash.livingValue ?? legacyCash.value);
+  const netCny = netUsd !== null && fxRate ? netUsd * fxRate : null;
+  const legacyCov = useLive
+    ? (legacyLive.data_status === "OK" && legacyCash.complete ? "COMPLETE" : legacyLive.data_status === "MISSING" ? "MISSING" : "PARTIAL")
+    : ledgerCoverage(legacyPeriod.coverage_status, "PARTIAL");
+  const monthDisp = resolvePeriodCashflowDisplay(trading, legacyMonth);
+  const monthLiving = monthDisp.livingValue ?? monthDisp.value;
+  const coveredCny = monthLiving !== null && fxRate ? monthLiving * fxRate : null;
+  const coveredPos = coveredCny !== null ? Math.max(coveredCny, 0) : null;
+  const gapCny = coveredPos !== null ? Math.max(resolvedTargetCny - coveredPos, 0) : null;
+  const ratio = coveredPos !== null && resolvedTargetCny > 0 ? coveredPos / resolvedTargetCny : null;
+  const legacySeries = buildCashflowChartSeries(
+    Array.isArray(trading?.daily) ? trading.daily : [],
+    safeCadence === "year" ? "year" : safeCadence === "month" ? "month" : safeCadence === "week" ? "week" : "day",
+    { periods: legacyPeriods },
+  );
+  const trend = (Array.isArray(legacySeries) ? legacySeries : []).map((pt) => {
+    const net = ledgerFiniteNumber(pt.livingValue ?? pt.value);
+    const passiveVal = ledgerFiniteNumber(pt.interestValue);
+    const tradingVal = ledgerFiniteNumber(pt.value);
+    return {
+      label: String(pt.labels?.label || pt.label || pt.date || ""),
+      date: String(pt.date || pt.labels?.fullLabel || pt.label || ""),
+      netIncomeUsd: net,
+      tradingUsd: tradingVal,
+      passiveUsd: passiveVal,
+      freeInflowUsd: net,
+      complete: Boolean(net !== null),
+      provisional: Boolean(pt.provisional),
+    };
+  });
+  const healthReasons = ["当前仅接入传统聚合成交视图"];
+  if (fxStale) healthReasons.push("汇率数据滞后或缺失");
+  if (legacyCov !== "COMPLETE") healthReasons.push("部分传统结算口径尚未完全就绪");
+  return {
+    engine: "legacy",
+    cadence: safeCadence,
+    dayMode: safeDayMode,
+    isIntradayLive: Boolean(useLive),
+    hasIntradayLive: Boolean(trading?.live && trading.live.data_status !== "NO_ACTIVE_SESSION"),
+    settledThrough: trading?.meta?.settled_through || legacyPeriods[0]?.end_date || null,
+    monitoringDay: (useLive ? legacyLive.monitoring_day : legacyPeriod.end_date) || null,
+    startDate: (useLive ? legacyLive.monitoring_day : legacyPeriod.start_date) || null,
+    endDate: (useLive ? legacyLive.monitoring_day : legacyPeriod.end_date) || null,
+    coverageStatus: legacyCov,
+    fxRate,
+    fxAsOf,
+    fxStatus,
+    fxStale,
+    sources,
+    warningCodes: ["LEGACY_FALLBACK"],
+    healthReasons,
+    hero: {
+      netRealizedCashIncomeUsd: ledgerFiniteNumber(netUsd),
+      netRealizedCashIncomeCny: netCny,
+      freeCashInflowUsd: ledgerFiniteNumber(netUsd),
+      freeCashInflowCny: netCny,
+      releasedPrincipalUsd: null,
+      personalTaxReserveUsd: 0,
+      sellProceedsUsd: null,
+      isComplete: legacyCov === "COMPLETE",
+      withdrawalSafety: {
+        available: false,
+        cashCoverageStatus: "MISSING",
+        totalUsdCash: null,
+        tPlus1UnsettledUsd: null,
+        settledWithdrawableUsd: null,
+        marginDeficitAlert: false,
+      },
+      monthlyTarget: {
+        targetCny: resolvedTargetCny,
+        coveredCny,
+        gapCny,
+        coverageRatio: ratio,
+        isMonthReference: safeCadence !== "month",
+        referenceLabel: safeCadence === "month" ? "本月目标达成" : "本月生活目标参考进度",
+      },
+    },
+    pillars: {
+      swing: {
+        available: Boolean(useLive ? legacyLive.same_day_equity : legacyPeriod),
+        trades: useLive ? ledgerNonNegativeInt(legacyLive.same_day_equity?.closed_trades) : ledgerNonNegativeInt(legacyPeriod.closed_trades),
+        wins: null,
+        losses: null,
+        winRate: null,
+        grossPnlUsd: useLive ? ledgerFiniteNumber(legacyLive.same_day_equity?.gross_pnl) : null,
+        feesUsd: useLive ? ledgerFiniteNumber(legacyLive.same_day_equity?.fees) : null,
+        netPnlUsd: useLive
+          ? ledgerFiniteNumber(legacyLive.cashflow_same_day_equity_net_pnl ?? legacyLive.same_day_equity?.net_pnl)
+          : ledgerFiniteNumber(legacyPeriod.active_net_pnl),
+      },
+      options: {
+        available: Boolean(useLive && legacyLive.options),
+        trades: useLive ? ledgerNonNegativeInt(legacyLive.options?.closed_trades) : null,
+        grossPnlUsd: useLive ? ledgerFiniteNumber(legacyLive.options?.gross_pnl) : null,
+        feesUsd: useLive ? ledgerFiniteNumber(legacyLive.options?.fees) : null,
+        netPnlUsd: useLive ? ledgerFiniteNumber(legacyLive.options?.net_pnl) : null,
+      },
+      core: {
+        available: false,
+        trades: null,
+        sellFeesUsd: null,
+        realizedNetProfitUsd: useLive ? ledgerFiniteNumber(legacyLive.long_term_realization_net_pnl) : null,
+        releasedPrincipalUsd: null,
+        totalCashInflowUsd: null,
+        costBaselineStatus: "MISSING",
+      },
+      passive: {
+        available: true,
+        grossDividendUsd: null,
+        dividendTaxUsd: null,
+        ptpWithholdingUsd: null,
+        netDividendUsd: useLive ? ledgerFiniteNumber(legacyLive.cashflow_dividend) : ledgerFiniteNumber(legacyPeriod.dividend_cashflow),
+        brokerFeeUsd: null,
+        interestUsd: useLive
+          ? (legacyLive.interest_coverage_status === "COMPLETE" ? ledgerFiniteNumber(legacyLive.account_interest_cashflow) : null)
+          : ledgerFiniteNumber(legacyPeriod.account_interest_cashflow),
+        passiveNetUsd: null,
+        accruedInterestReferenceUsd: null,
+      },
+    },
+    trend,
+  };
 }

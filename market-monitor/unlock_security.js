@@ -12,8 +12,12 @@
   }
 
   if (changed) {
-    const sanitizedUrl = `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
-    window.history.replaceState(window.history.state, "", sanitizedUrl);
+    const sanitizedUrl = currentUrl.toString();
+    try {
+      window.history.replaceState(window.history.state, "", sanitizedUrl);
+    } catch {
+      // Form protection below must still register if history access is blocked.
+    }
   }
 
   // Bind before the deferred application module. If that module fails to load,

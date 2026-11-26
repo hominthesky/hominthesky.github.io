@@ -1,4 +1,5 @@
 "use strict";
+import { MAX_FUTURE_CLOCK_SKEW_MS } from "./live_trading.mjs";
 
 export const HOLDING_STRATEGY_LABELS = Object.freeze({
   高进攻: "高进攻",
@@ -87,6 +88,66 @@ function sanitizeBroker(row, batchTimestamp) {
   };
 }
 
+export function sanitizeOption(value) {
+  if (value === null || value === undefined) return null;
+  const keys = ["underlying", "expiry", "right", "strike", "multiplier", "adjusted_root"];
+  if (typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== keys.length
+    || !keys.every(key => Object.hasOwn(value, key))
+    || typeof value.underlying !== "string" || !/^[A-Z][A-Z0-9.]{0,19}$/.test(value.underlying)
+    || !["C", "P"].includes(value.right) || typeof value.adjusted_root !== "boolean"
+    || nativeNumber(value.strike) === null || value.strike <= 0
+    || !((value.multiplier === null && value.adjusted_root)
+      || (nativeNumber(value.multiplier) !== null && value.multiplier > 0))) throw new Error("期权要素无效。");
+  requiredDate(value.expiry);
+  return Object.fromEntries(keys.map(key => [key, value[key]]));
+}
+
+export function holdingDisplayLabel(row) {
+  const option = row?.option;
+  return option ? `${option.underlying} ${option.expiry} ${option.strike}${option.right}` : row?.ticker || "—";
+}
+
+export function sanitizeHoldingTags(value) {
+  const fields=["role","underlying","theme","intent","horizon","scope","source"];
+  const dims=["role","theme","intent","horizon","scope"];
+  const sources=new Set(["manual","inferred","default"]);
+  if (!value || typeof value!=="object" || Array.isArray(value)
+      || Object.keys(value).length!==fields.length || !fields.every(k=>Object.hasOwn(value,k))
+      || !["OFFENSE","CASHFLOW","DEFENSE","HEDGE","CASH_LIKE","UNASSIGNED"].includes(value.role)
+      || typeof value.underlying!=="string" || !/^[A-Z0-9][A-Z0-9._-]{0,29}$/.test(value.underlying)
+      || !["COVERED_CALL","CASH_SECURED_PUT","PROTECTIVE_PUT","LONG_CALL","LONG_PUT","SPREAD","NAKED_SHORT","UNKNOWN"].includes(value.intent)
+      || !["INTRADAY","SWING","POSITION","CORE_LONG","UNKNOWN"].includes(value.horizon)
+      || !["ACTIVE","CORE","UNCLASSIFIED"].includes(value.scope)
+      || !Array.isArray(value.theme) || value.theme.length>30 || new Set(value.theme).size!==value.theme.length
+      || value.theme.some(t=>typeof t!=="string" || !/^[a-z][a-z0-9_]{0,39}$/.test(t))
+      || !value.source || typeof value.source!=="object" || Array.isArray(value.source)
+      || Object.keys(value.source).length!==dims.length || !dims.every(k=>sources.has(value.source[k]))) {
+    throw new Error("持仓标签无效。");
+  }
+  return {...value,theme:[...value.theme],source:{...value.source}};
+}
+
+export function holdingTagLabels(value) {
+  if (!value) return [];
+  const tags=sanitizeHoldingTags(value);
+  const labels={OFFENSE:"高进攻",CASHFLOW:"现金流",DEFENSE:"防御",HEDGE:"保护",CASH_LIKE:"现金类",UNASSIGNED:"未分类",
+    COVERED_CALL:"备兑",CASH_SECURED_PUT:"现金担保卖Put",PROTECTIVE_PUT:"保护Put",LONG_CALL:"买Call",LONG_PUT:"买Put",
+    SPREAD:"价差组合",NAKED_SHORT:"无对应担保",UNKNOWN:"待确认",INTRADAY:"日内",SWING:"波段",POSITION:"中期",CORE_LONG:"底仓长期"};
+  const result=["role","intent","horizon"].map(dimension=>({dimension,label:labels[tags[dimension]],
+    source:tags.source[dimension],inferred:tags.source[dimension]==="inferred"}));
+  const themeLabels={semi:"半导体",memory_storage:"存储",chip_core:"芯片核心",nasdaq_core:"纳指核心"};
+  for (const theme of tags.theme) result.push({dimension:"theme",label:themeLabels[theme]||theme,source:tags.source.theme,inferred:tags.source.theme==="inferred"});
+  return result;
+}
+
+export function holdingStatusPresentation(status, {ageMinutes=null,risk=false}={}) {
+  if (risk || status==="RED") return {label:"需要处理",tone:"red",tooltip:String(status)};
+  if (status==="STALE") return {label:Number.isFinite(ageMinutes)?`已过期 ${Math.max(0,Math.floor(ageMinutes))} 分钟`:"已过期",tone:"amber",tooltip:status};
+  if (["OK","COMPLETE"].includes(status)) return {label:"最新",tone:"green",tooltip:status};
+  if (["PARTIAL","EXPECTED_LAG"].includes(status)) return {label:"部分数据",tone:"amber",tooltip:status};
+  return {label:"不可用",tone:"gray",tooltip:String(status||"MISSING")};
+}
+
 function sanitizeHolding(row, batchTimestamp) {
   const brokers = new Set(["Futu", "Tiger", "IBKR"]);
   const instruments = new Set(["STOCK", "ETF", "FUND", "BOND", "REIT", "ADR", "OPTION", "CASH", "OTHER"]);
@@ -124,6 +185,8 @@ function sanitizeHolding(row, batchTimestamp) {
     broker: row.broker,
     ticker: row.ticker,
     instrument_type: row.instrument_type,
+    option: row.instrument_type === "OPTION" ? sanitizeOption(row.option) : null,
+    ...(Object.hasOwn(row,"tags") ? {tags:sanitizeHoldingTags(row.tags)} : {}),
     direction: row.direction,
     quantity,
     market_value_usd: value,
@@ -276,11 +339,14 @@ export function effectiveHoldingsStatus(value, nowMs = Date.now(), staleAfterMs 
   if (status !== "OK") return status;
   const observedAt = Date.parse(value?.source_retrieved_at || "");
   if (!Number.isFinite(observedAt) || !Number.isFinite(nowMs) || !Number.isFinite(staleAfterMs)
-    || staleAfterMs <= 0 || nowMs < observedAt || nowMs - observedAt > staleAfterMs) return "STALE";
+    || staleAfterMs <= 0 || nowMs + MAX_FUTURE_CLOCK_SKEW_MS < observedAt || nowMs - observedAt > staleAfterMs) return "STALE";
   return "OK";
 }
 
-export function dashboardStatusForView(view, publicStatus, holdingsState, holdingsData) {
+export function dashboardStatusForView(view, publicStatus, holdingsState, holdingsData, portfolioStatus = null) {
+  if (view !== "holdings" && portfolioStatus && portfolioStatus !== "OK") {
+    return { text: portfolioStatus === "STALE" ? "当前视图数据已过期" : "当前视图数据不完整", tone: "amber" };
+  }
   if (view !== "holdings") {
     return publicStatus === "ready"
       ? { text: "数据已就绪", tone: "green" }
